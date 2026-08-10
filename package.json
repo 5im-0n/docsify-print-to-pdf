@@ -1,0 +1,15 @@
+{
+  "name": "docsifyt2pdf",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "docs": "docsify serve docs -H 127.0.0.1 -o"
+  },
+  "dependencies": {
+    "docsify-cli": "^5.0.0"
+  }
+}
