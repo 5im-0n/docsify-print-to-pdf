@@ -3,14 +3,31 @@
  * On click it:
  *   1. reads _sidebar.md to learn the chapters (title + order, same as the sidebar)
  *   2. fetches every chapter markdown file and renders it with markdown-it
- *   3. assembles a printable document: cover page (_media/cover.jpg) + all chapters
- *   4. opens it in a hidden same-origin iframe and calls the browser's print dialog
- *      so the user can "Save as PDF".
+ *   3. assembles a printable document: cover page (_media/cover.jpg) + table of
+ *      contents + all chapters, then paginates it into explicit 210x297mm
+ *      "sheets" (one sheet = one printed page) and puts a real, absolutely
+ *      positioned footer with the page number at the bottom-right of every
+ *      page except the cover
+ *   4. opens it in a hidden same-origin iframe and calls the browser's print
+ *      dialog so the user can "Save as PDF".
+ *
+ * Why explicit sheets instead of CSS?
+ *   - CSS @page margin boxes (@bottom-right { content: counter(page) }) are not
+ *     supported by Chrome/Firefox "Save as PDF".
+ *   - A position:fixed footer is laid out by Chromium against a viewport wider
+ *     than the page box (so it lands off-page) and is printed only once, not
+ *     repeated on every page.
+ *   So the only portable way to get a page number on every page is to make
+ *   each page a real element and place the footer inside it.
  */
 (function () {
   'use strict';
 
   var PROJECT = (window.$docsify && window.$docsify.name) || 'Project';
+  // Table of contents heading — configurable via $docsify.print.tocTitle
+  // in index.html (fallback: "Table of Contents").
+  var TOC_TITLE = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.tocTitle) || 'Table of Contents';
 
   /* ---------------------------------------------------------------- button */
   function makeButton() {
@@ -49,13 +66,25 @@
     if (!res.ok) throw new Error('Could not load _sidebar.md');
     var text = await res.text();
     var chapters = [];
-    var re = /\[([^\]]+)\]\(([^)]+)\)/g;
+    // Capture the leading indentation of each sidebar line so the table of
+    // contents can mirror the nesting (top-level vs. sub-chapters).
+    var re = /^([ \t]*)- \[([^\]]+)\]\(([^)]+)\)/gm;
     var m;
     while ((m = re.exec(text)) !== null) {
-      chapters.push({ title: m[1], file: linkToFile(m[2]) });
+      var indent = m[1].replace(/\t/g, '  ').length;
+      chapters.push({
+        title: m[2],
+        file: linkToFile(m[3]),
+        depth: Math.round(indent / 2)
+      });
     }
     if (!chapters.length) throw new Error('No chapters found in _sidebar.md');
     return chapters;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   /* ------------------------------------------------------------ rendering */
@@ -89,15 +118,17 @@
   /* ------------------------------------------------------------- assembly */
   function styles() {
     return [
-      /* size A4 + zero margins = the printable area is exactly 210x297mm,
-         so the cover fills page 1 edge-to-edge (no white border, no bleed
-         onto page 2). Chapter pages get their inset from .chapter padding. */
+      /* A4, zero margins. Every page of the PDF is an explicit .sheet /
+         .page-sheet element exactly 210x297mm, so one sheet == one printed
+         page and the page-number footer (a real element inside each sheet)
+         is guaranteed to appear, independent of the engine's pagination. */
       '@page{size:A4;margin:0}',
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
       'html,body{margin:0;padding:0}',
       'body{font:12pt/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#333}',
-      /* --- cover page (full-bleed A4, exactly one page) --- */
-      '.cover-page{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always}',
+      /* --- cover (page 1, full-bleed, no footer) --- */
+      '.cover-page{position:relative;width:210mm;height:297mm;overflow:hidden;' +
+        'page-break-after:always;break-after:page}',
       '.cover-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
       '.cover-content{position:relative;z-index:1;height:100%;display:flex;' +
         'flex-direction:column;justify-content:center;align-items:center;text-align:center;' +
@@ -106,31 +137,62 @@
         'text-shadow:0 2px 14px rgba(0,0,0,.55)}',
       '.cover-subtitle{font-size:14pt;opacity:.95;margin-top:14px;' +
         'text-shadow:0 1px 8px rgba(0,0,0,.55)}',
+      /* --- inner pages (table of contents + chapters) --- */
+      '.page-sheet{position:relative;width:210mm;height:297mm;padding:20mm 18mm;' +
+        'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
+      /* padding-top/bottom of 0.1px stop the first/last child margins from
+         collapsing out of the flow, so scrollHeight measures the real used
+         height during pagination */
+      '.page-sheet .sheet-flow{position:relative;width:100%;height:100%;' +
+        'padding-top:0.1px;padding-bottom:0.1px}',
+      '.page-footer{position:absolute;right:16mm;bottom:8mm;' +
+        'font:10pt/1 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#667}',
+      /* --- table of contents --- */
+      '.toc-title{font-size:26pt;font-weight:700;color:#2c3e50;margin:0 0 26px;' +
+        'padding-bottom:10px;border-bottom:2px solid #42b983}',
+      '.toc-list{list-style:none;margin:0;padding:0}',
+      '.toc-list li{padding:9px 0;border-bottom:1px solid #eef1f4}',
+      '.toc-list li.lvl-0{font-weight:600;font-size:14pt;color:#2c3e50}',
+      '.toc-list li.lvl-1{padding-left:28px;font-size:12pt;color:#555}',
+      '.toc-list li.lvl-1::before{content:"—";color:#42b983;margin-right:10px}',
       /* --- chapters --- */
-      '.chapter{page-break-before:always;padding:20mm 18mm}',
-      '.chapter h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
+      '.sheet-flow h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
         'border-bottom:2px solid #42b983;color:#2c3e50}',
-      '.chapter h2{font-size:16pt;margin:24px 0 8px;color:#2c3e50}',
-      '.chapter h3{font-size:13pt;margin:18px 0 6px;color:#2c3e50}',
-      '.chapter p{margin:0 0 10px}',
-      '.chapter blockquote{margin:10px 0;padding:8px 14px;border-left:4px solid #42b983;' +
+      '.sheet-flow h2{font-size:16pt;margin:24px 0 8px;color:#2c3e50}',
+      '.sheet-flow h3{font-size:13pt;margin:18px 0 6px;color:#2c3e50}',
+      '.sheet-flow p{margin:0 0 10px}',
+      '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;border-left:4px solid #42b983;' +
         'background:#f6faf8;color:#555;border-radius:0 6px 6px 0}',
-      '.chapter blockquote p{margin:0}',
-      '.chapter ul,.chapter ol{margin:0 0 10px;padding-left:24px}',
-      '.chapter pre{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;' +
+      '.sheet-flow blockquote p{margin:0}',
+      '.sheet-flow ul,.sheet-flow ol{margin:0 0 10px;padding-left:24px}',
+      '.sheet-flow pre{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;' +
         'padding:12px;overflow:auto;font:10pt/1.5 "Courier New",monospace}',
-      '.chapter code{font-family:"Courier New",monospace;background:#f6f8fa;' +
+      '.sheet-flow code{font-family:"Courier New",monospace;background:#f6f8fa;' +
         'padding:1px 5px;border-radius:4px;font-size:10.5pt}',
-      '.chapter pre code{background:none;padding:0}',
-      '.chapter table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11pt}',
-      '.chapter th,.chapter td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}',
-      '.chapter th{background:#f6f8fa}',
-      '.chapter img{max-width:100%;border-radius:4px}',
-      '.chapter hr{border:none;border-top:1px solid #e1e4e8;margin:20px 0}'
+      '.sheet-flow pre code{background:none;padding:0}',
+      '.sheet-flow table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11pt}',
+      '.sheet-flow th,.sheet-flow td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}',
+      '.sheet-flow th{background:#f6f8fa}',
+      '.sheet-flow img{max-width:100%;border-radius:4px}',
+      '.sheet-flow hr{border:none;border-top:1px solid #e1e4e8;margin:20px 0}'
     ].join('\n');
   }
 
-  function pageHtml(coverUrl, chaptersHtml) {
+  function tocHtml(chapters) {
+    var items = chapters.map(function (ch) {
+      return '<li class="' + (ch.depth > 0 ? 'lvl-1' : 'lvl-0') + '">' +
+        escapeHtml(ch.title) + '</li>';
+    }).join('');
+    return '<section class="toc-page">' +
+      '<h1 class="toc-title">' + escapeHtml(TOC_TITLE) + '</h1>' +
+      '<ul class="toc-list">' + items + '</ul>' +
+      '</section>';
+  }
+
+  /* Phase 1 document: cover + toc + chapters laid out as plain stacked
+     sections (no explicit pages yet). paginate() then slices each section
+     into one-page sheets and adds the numbered footers. */
+  function pageHtml(coverUrl, chapters, chaptersHtml) {
     return [
       '<!DOCTYPE html>',
       '<html><head><meta charset="utf-8">',
@@ -144,9 +206,86 @@
       '<div class="cover-subtitle">Project documentation</div>',
       '</div>',
       '</div>',
+      tocHtml(chapters),
       chaptersHtml,
       '</body></html>'
     ].join('\n');
+  }
+
+  /* Create an empty one-page sheet (used during pagination). */
+  function newSheet(doc) {
+    var sheet = doc.createElement('div');
+    sheet.className = 'page-sheet';
+    var flow = doc.createElement('div');
+    flow.className = 'sheet-flow';
+    sheet.appendChild(flow);
+    return sheet;
+  }
+
+  /* Slices the phase-1 sections into one-page sheets. Sections are:
+     cover-page, toc-page, chapter, chapter, ... (body children in order).
+     Every sheet except the cover gets a footer with its real page number. */
+  function paginate(doc) {
+    var body = doc.body;
+    var sections = Array.prototype.slice.call(body.children);
+    var allSheets = [];
+
+    sections.forEach(function (section) {
+      if (section.classList.contains('cover-page')) {
+        allSheets.push(section); // page 1 — full-bleed, no footer
+        return;
+      }
+      var children = Array.prototype.slice.call(section.childNodes);
+      if (!children.length) children = [doc.createTextNode('')];
+      var current = null;
+      var flow = null;
+      children.forEach(function (child) {
+        if (!current) {
+          current = newSheet(doc);
+          allSheets.push(current);
+          flow = current.querySelector('.sheet-flow');
+        }
+        flow.appendChild(child);
+        // Too tall for the remaining page? Move it to a fresh sheet. Guard
+        // with childNodes.length > 1 so a single oversized element (e.g. a
+        // very tall image) keeps its own sheet instead of looping forever.
+        if (flow.scrollHeight > flow.clientHeight + 2 && flow.childNodes.length > 1) {
+          flow.removeChild(child);
+          current = newSheet(doc);
+          allSheets.push(current);
+          flow = current.querySelector('.sheet-flow');
+          flow.appendChild(child);
+        }
+      });
+    });
+
+    // Rebuild the body from the sheets, numbering every page but the cover.
+    body.textContent = '';
+    var pageNo = 1;
+    allSheets.forEach(function (sheet, idx) {
+      if (idx > 0) {
+        pageNo++;
+        var footer = doc.createElement('div');
+        footer.className = 'page-footer';
+        footer.textContent = String(pageNo);
+        sheet.appendChild(footer);
+      }
+      body.appendChild(sheet);
+    });
+  }
+
+  function getFrame() {
+    var frame = document.getElementById('print-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'print-frame';
+      frame.setAttribute('aria-hidden', 'true');
+      // Sized to A4 (210x297mm at 96dpi) so on-screen layout matches print.
+      // Hidden off-screen (not display:none, which would break measuring/printing).
+      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+      document.body.appendChild(frame);
+    }
+    return frame;
   }
 
   async function build() {
@@ -166,18 +305,15 @@
 
     var coverUrl = new URL('_media/cover.jpg', window.location.origin + '/').href;
 
-    var frame = document.getElementById('print-frame');
-    if (!frame) {
-      frame = document.createElement('iframe');
-      frame.id = 'print-frame';
-      frame.setAttribute('aria-hidden', 'true');
-      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;border:0';
-      document.body.appendChild(frame);
-    }
+    var frame = getFrame();
     var doc = frame.contentDocument;
     doc.open();
-    doc.write(pageHtml(coverUrl, chunks.join('\n')));
+    doc.write(pageHtml(coverUrl, chapters, chunks.join('\n')));
     doc.close();
+    await waitForImages(doc);
+    await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
+    paginate(doc);
+    await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;
   }
 
@@ -202,8 +338,7 @@
     if (btn) btn.textContent = 'Building PDF…';
     try {
       var frame = await build();
-      await waitForImages(frame.contentDocument);
-      await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
+      await new Promise(function (r) { setTimeout(r, 200); });
       printFrame(frame);
     } finally {
       if (btn) btn.textContent = 'Print to PDF';
