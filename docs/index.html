@@ -23,7 +23,12 @@
         hideOtherSidebarContent: false
       },
       print: {
-        tocTitle: 'Table of Contents'   // heading of the TOC page in the exported PDF
+        tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
+        // How chapters start in the exported PDF:
+        //   'page'    (default) — every chapter starts on a new page
+        //   'onePage'           — every chapter is scaled to fit on exactly one page
+        //   'flow'              — no page break, chapters flow continuously
+        chapterBreak: 'flow'
       }
     }
   </script>

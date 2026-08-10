@@ -13,6 +13,15 @@
  *   4. opens it in a hidden same-origin iframe and calls the browser's print
  *      dialog so the user can "Save as PDF".
  *
+ * How chapters start is configurable via window.$docsify.print.chapterBreak
+ * (see index.html):
+ *   'page'    (default) — every chapter starts on a new page and may span
+ *                         several pages
+ *   'onePage'           — every chapter is scaled down to fit on exactly one
+ *                         page (slide-deck style)
+ *   'flow'              — no page break: chapters flow continuously, content
+ *                         simply continues on the same page
+ *
  * Why explicit sheets instead of CSS?
  *   - CSS @page margin boxes (@bottom-right { content: counter(page) }) are not
  *     supported by Chrome/Firefox "Save as PDF".
@@ -30,6 +39,12 @@
   // in index.html (fallback: "Table of Contents").
   var TOC_TITLE = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.tocTitle) || 'Table of Contents';
+  // How chapters start in the PDF — window.$docsify.print.chapterBreak:
+  //   'page'    (default) — every chapter starts on a new page
+  //   'onePage'           — every chapter is scaled to fit on one page
+  //   'flow'              — no page break, chapters flow continuously
+  var CHAPTER_BREAK = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.chapterBreak) || 'page';
 
   /* ---------------------------------------------------------------- button */
   function makeButton() {
@@ -248,35 +263,102 @@
     return sheet;
   }
 
+  /* Scales the content of a single-sheet flow down (if needed) so that
+     everything fits inside the sheet — used by the "onePage" chapter mode.
+     The scale is applied as a CSS transform on the flow, so the absolutely
+     positioned page-number footer (a sibling of the flow) is unaffected. */
+  function fitToPage(flow) {
+    var scale = 1;
+    if (flow.scrollHeight > flow.clientHeight + 2) {
+      scale = Math.min(scale, flow.clientHeight / flow.scrollHeight);
+    }
+    if (flow.scrollWidth > flow.clientWidth + 2) {
+      scale = Math.min(scale, flow.clientWidth / flow.scrollWidth);
+    }
+    if (scale < 1) {
+      flow.style.transformOrigin = 'top left';
+      flow.style.transform = 'scale(' + scale + ')';
+    }
+  }
+
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ... (body children in order).
      Every sheet except the cover gets a footer with its real page number.
      Returns the starting page number of each chapter section (in order) so
-     the caller can fill the numbers into the table of contents. */
-  function paginate(doc) {
+     the caller can fill the numbers into the table of contents.
+
+     IMPORTANT: every sheet is appended to the document as soon as it is
+     created. A sheet that is not in the document has no layout and reports
+     scrollHeight/clientHeight = 0, which would silently disable the
+     "move to the next sheet when full" logic below (everything would pile
+     onto one page and get clipped).
+
+     The page-break behaviour between chapters is controlled by `mode`
+     (window.$docsify.print.chapterBreak):
+       'page'    — each chapter starts on a fresh page (default)
+       'onePage' — each chapter is scaled down to fit on exactly one page
+       'flow'    — no page break: chapters flow continuously */
+  function paginate(doc, mode) {
     var body = doc.body;
+    // Capture the phase-1 sections first, then clear the body: the sections
+    // are only needed as containers whose children get moved into sheets.
     var sections = Array.prototype.slice.call(body.children);
     var allSheets = [];
     var chapterStarts = [];
+    var prevWasChapter = false;
+    body.textContent = '';
 
     sections.forEach(function (section) {
       if (section.classList.contains('cover-page')) {
         allSheets.push(section); // page 1 — full-bleed, no footer
+        body.appendChild(section);
+        prevWasChapter = false;
         return;
       }
-      if (section.classList.contains('chapter')) {
-        // Each section starts on a fresh sheet, so the page this chapter
-        // begins on is simply the number of sheets created so far + 1.
-        chapterStarts.push(allSheets.length + 1);
-      }
+
+      var isChapter = section.classList.contains('chapter');
       var children = Array.prototype.slice.call(section.childNodes);
       if (!children.length) children = [doc.createTextNode('')];
+
+      // "onePage": put the whole chapter in a single sheet and scale it down
+      // if it doesn't fit, so the chapter never spills onto a second page.
+      if (isChapter && mode === 'onePage') {
+        chapterStarts.push(allSheets.length + 1);
+        var one = newSheet(doc);
+        allSheets.push(one);
+        body.appendChild(one); // attach so fitToPage() can measure it
+        var oneFlow = one.querySelector('.sheet-flow');
+        children.forEach(function (child) { oneFlow.appendChild(child); });
+        fitToPage(oneFlow);
+        prevWasChapter = true;
+        return;
+      }
+
+      // "flow": from the second chapter on, keep filling the previous sheet
+      // instead of forcing a page break. The first chapter (and the TOC)
+      // still starts on a fresh page.
       var current = null;
       var flow = null;
+      var continueFlow = mode === 'flow' && isChapter && prevWasChapter;
+      if (continueFlow) {
+        var last = allSheets[allSheets.length - 1];
+        if (last && last.classList.contains('page-sheet')) {
+          current = last;
+          flow = current.querySelector('.sheet-flow');
+        }
+      }
+
+      if (isChapter) {
+        // Page this chapter begins on: the sheet we're continuing on (already
+        // counted in allSheets), or the next fresh sheet.
+        chapterStarts.push(current ? allSheets.length : allSheets.length + 1);
+      }
+
       children.forEach(function (child) {
         if (!current) {
           current = newSheet(doc);
           allSheets.push(current);
+          body.appendChild(current); // attach so it can be measured
           flow = current.querySelector('.sheet-flow');
         }
         flow.appendChild(child);
@@ -287,14 +369,18 @@
           flow.removeChild(child);
           current = newSheet(doc);
           allSheets.push(current);
+          body.appendChild(current); // attach so it can be measured
           flow = current.querySelector('.sheet-flow');
           flow.appendChild(child);
         }
       });
+
+      prevWasChapter = isChapter;
     });
 
-    // Rebuild the body from the sheets, numbering every page but the cover.
-    body.textContent = '';
+    // Number every page but the cover. The sheets are already in the body
+    // (they had to be attached during pagination so their heights could be
+    // measured), so only the footers are added here.
     var pageNo = 1;
     allSheets.forEach(function (sheet, idx) {
       if (idx > 0) {
@@ -304,7 +390,6 @@
         footer.textContent = String(pageNo);
         sheet.appendChild(footer);
       }
-      body.appendChild(sheet);
     });
 
     return chapterStarts;
@@ -362,7 +447,7 @@
     doc.close();
     await waitForImages(doc);
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
-    var chapterStarts = paginate(doc);
+    var chapterStarts = paginate(doc, CHAPTER_BREAK);
     fillToc(doc, chapterStarts);
     await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;
