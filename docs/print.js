@@ -7,7 +7,9 @@
  *      contents + all chapters, then paginates it into explicit 210x297mm
  *      "sheets" (one sheet = one printed page) and puts a real, absolutely
  *      positioned footer with the page number at the bottom-right of every
- *      page except the cover
+ *      page except the cover; the TOC lists every chapter as a uniform row
+ *      with its starting page number on the right of each row (nested
+ *      chapters are indented under their parent, like in the sidebar)
  *   4. opens it in a hidden same-origin iframe and calls the browser's print
  *      dialog so the user can "Save as PDF".
  *
@@ -66,16 +68,16 @@
     if (!res.ok) throw new Error('Could not load _sidebar.md');
     var text = await res.text();
     var chapters = [];
-    // Capture the leading indentation of each sidebar line so the table of
-    // contents can mirror the nesting (top-level vs. sub-chapters).
+    // Capture the leading whitespace so nested sidebar entries (indented with
+    // two spaces per level, like in the sidebar itself) can be indented in the
+    // table of contents as well.
     var re = /^([ \t]*)- \[([^\]]+)\]\(([^)]+)\)/gm;
     var m;
     while ((m = re.exec(text)) !== null) {
-      var indent = m[1].replace(/\t/g, '  ').length;
       chapters.push({
         title: m[2],
         file: linkToFile(m[3]),
-        depth: Math.round(indent / 2)
+        depth: Math.floor(m[1].length / 2)
       });
     }
     if (!chapters.length) throw new Error('No chapters found in _sidebar.md');
@@ -147,14 +149,25 @@
         'padding-top:0.1px;padding-bottom:0.1px}',
       '.page-footer{position:absolute;right:16mm;bottom:8mm;' +
         'font:10pt/1 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#667}',
-      /* --- table of contents --- */
-      '.toc-title{font-size:26pt;font-weight:700;color:#2c3e50;margin:0 0 26px;' +
-        'padding-bottom:10px;border-bottom:2px solid #42b983}',
-      '.toc-list{list-style:none;margin:0;padding:0}',
-      '.toc-list li{padding:9px 0;border-bottom:1px solid #eef1f4}',
-      '.toc-list li.lvl-0{font-weight:600;font-size:14pt;color:#2c3e50}',
-      '.toc-list li.lvl-1{padding-left:28px;font-size:12pt;color:#555}',
-      '.toc-list li.lvl-1::before{content:"—";color:#42b983;margin-right:10px}',
+      /* --- table of contents ---
+         After pagination the TOC lives inside a .sheet-flow, so these rules
+         are scoped with .sheet-flow to win over the generic .sheet-flow h1
+         and .sheet-flow ul rules (otherwise the list gets indented 24px and
+         the title is restyled by the chapter h1 rule). */
+      '.sheet-flow .toc-title{font-size:26pt;font-weight:700;color:#2c3e50;' +
+        'margin:0 0 26px;padding-bottom:10px;border-bottom:2px solid #42b983}',
+      '.sheet-flow .toc-list{list-style:none;margin:0;padding:0}',
+      /* Every chapter is one uniform row: title on the left, page number
+         pushed to the right edge of the row. No size/weight differences and
+         no separators between rows. Nested chapters are indented under their
+         parent, like in the sidebar (the whole row shifts — number and title
+         together). */
+      '.sheet-flow .toc-list li{display:flex;align-items:baseline;gap:12px;' +
+        'padding:6px 0;font-size:13pt;color:#2c3e50}',
+      '.sheet-flow .toc-list li.toc-sub{padding-left:16mm}',
+      '.sheet-flow .toc-list .toc-no{margin-left:auto;flex:0 0 14mm;' +
+        'text-align:right;font-weight:600;color:#42b983;' +
+        'font-variant-numeric:tabular-nums}',
       /* --- chapters --- */
       '.sheet-flow h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
         'border-bottom:2px solid #42b983;color:#2c3e50}',
@@ -179,9 +192,22 @@
   }
 
   function tocHtml(chapters) {
+    // Rows are rendered with an empty .toc-no span; the starting page number
+    // of each chapter is only known after pagination, so fillToc() writes it
+    // in afterwards (the span keeps its fixed width either way, so filling it
+    // in does not change the layout).
     var items = chapters.map(function (ch) {
-      return '<li class="' + (ch.depth > 0 ? 'lvl-1' : 'lvl-0') + '">' +
-        escapeHtml(ch.title) + '</li>';
+      // Nested chapters get an indent class so they line up under their
+      // parent (same font size/style as every other row).
+      var cls = ch.depth > 0 ? ' class="toc-sub"' : '';
+      // Title first, number last: with margin-left:auto on .toc-no the
+      // number is pushed to the right edge of the row while the title stays
+      // anchored at the left (if the number came first, the auto margin
+      // would push the whole row — number AND title — to the right).
+      return '<li' + cls + '>' +
+        '<span class="toc-name">' + escapeHtml(ch.title) + '</span>' +
+        '<span class="toc-no"></span>' +
+        '</li>';
     }).join('');
     return '<section class="toc-page">' +
       '<h1 class="toc-title">' + escapeHtml(TOC_TITLE) + '</h1>' +
@@ -224,16 +250,24 @@
 
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ... (body children in order).
-     Every sheet except the cover gets a footer with its real page number. */
+     Every sheet except the cover gets a footer with its real page number.
+     Returns the starting page number of each chapter section (in order) so
+     the caller can fill the numbers into the table of contents. */
   function paginate(doc) {
     var body = doc.body;
     var sections = Array.prototype.slice.call(body.children);
     var allSheets = [];
+    var chapterStarts = [];
 
     sections.forEach(function (section) {
       if (section.classList.contains('cover-page')) {
         allSheets.push(section); // page 1 — full-bleed, no footer
         return;
+      }
+      if (section.classList.contains('chapter')) {
+        // Each section starts on a fresh sheet, so the page this chapter
+        // begins on is simply the number of sheets created so far + 1.
+        chapterStarts.push(allSheets.length + 1);
       }
       var children = Array.prototype.slice.call(section.childNodes);
       if (!children.length) children = [doc.createTextNode('')];
@@ -271,6 +305,22 @@
         sheet.appendChild(footer);
       }
       body.appendChild(sheet);
+    });
+
+    return chapterStarts;
+  }
+
+  /* After pagination, write each chapter's starting page number into the
+     matching TOC row. Rows and chapters are in the same order, and the
+     number sits on the right edge of every row, after the chapter title. */
+  function fillToc(doc, chapterStarts) {
+    // The .toc-page wrapper no longer exists at this point: paginate() moved
+    // the TOC's children into a sheet and rebuilt the body from sheets, so
+    // match the list directly.
+    var rows = doc.querySelectorAll('.toc-list li');
+    rows.forEach(function (row, i) {
+      var no = row.querySelector('.toc-no');
+      if (no && chapterStarts[i]) no.textContent = String(chapterStarts[i]);
     });
   }
 
@@ -312,7 +362,8 @@
     doc.close();
     await waitForImages(doc);
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
-    paginate(doc);
+    var chapterStarts = paginate(doc);
+    fillToc(doc, chapterStarts);
     await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;
   }
