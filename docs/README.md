@@ -1,6 +1,7 @@
 # Introduction
 
-> TODO: Write the introduction to this document.
+> TODO: Write the introduction to this document.  
+> To set the title of this document replace `[Project]` in `index.html` with the name of the project.
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
 
