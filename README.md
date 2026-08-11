@@ -10,6 +10,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **Table of contents** — lists every chapter (from the sidebar) with its starting page number on the right, plus the sub-headings (`##`, `###`, …) of each chapter's markdown file with their page numbers; rows are indented under their parent exactly like the sidebar, and the depth follows the site's `maxLevel` / `subMaxLevel` settings (see [Configuration](#configuration)).
 - **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
+- **Optional orphan-heading prevention** — `print.keepHeadingsWithNext` moves an `h1`–`h6` to the following page when the content immediately after it cannot fit on the same page.
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
 
 ## Requirements
@@ -64,7 +65,8 @@ window.$docsify = {
     tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
     coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
-    chapterBreak: 'page'            // how chapters start in the exported PDF
+    chapterBreak: 'page',           // how chapters start in the exported PDF
+    keepHeadingsWithNext: true      // prevent a heading from being orphaned at a page bottom
   }
 };
 ```
@@ -110,6 +112,19 @@ How chapters start in the exported PDF:
 | `'page'`   | **(default)** every chapter starts on a new page and may span several pages |
 | `'onePage'`| every chapter is scaled down to fit on exactly one page (slide-deck style) |
 | `'flow'`   | no page break — chapters flow continuously, content continues on the same page |
+
+### `print.keepHeadingsWithNext`
+
+Set this to `true` to prevent chapter and subchapter headings (`h1`–`h6`) from being left alone at the bottom of a page. If the block immediately after a heading does not fit in the remaining space, the heading and that block are moved together to the next page. Consecutive headings are kept together as a group.
+
+```js
+print: {
+  chapterBreak: 'flow',
+  keepHeadingsWithNext: true
+}
+```
+
+Default: `false` (existing pagination behaviour is preserved unless this option is enabled). The option does not change the `'onePage'` mode, because that mode scales the complete chapter onto one sheet.
 
 ### `maxLevel` and `subMaxLevel`
 

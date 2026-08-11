@@ -32,7 +32,10 @@
         //   'page'    (default) — every chapter starts on a new page
         //   'onePage'           — every chapter is scaled to fit on exactly one page
         //   'flow'              — no page break, chapters flow continuously
-        chapterBreak: 'flow'
+        chapterBreak: 'flow',
+        // Keep h1-h6 headings with the block immediately after them. When the
+        // next block does not fit, the heading moves to the following page too.
+        keepHeadingsWithNext: true
       }
     }
   </script>

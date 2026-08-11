@@ -27,6 +27,11 @@
  *   'flow'              — no page break: chapters flow continuously, content
  *                         simply continues on the same page
  *
+ * Orphaned headings can be prevented with
+ * window.$docsify.print.keepHeadingsWithNext. When true, an h1-h6 that fits
+ * at the bottom of a page is moved to the next page if the content immediately
+ * following it does not fit beside it.
+ *
  * The cover and back-cover images are configurable via
  * window.$docsify.print.coverUrl and window.$docsify.print.backUrl.
  * Both are optional: when not set, no cover page and no back page are
@@ -65,6 +70,11 @@
   //   'flow'              — no page break, chapters flow continuously
   var CHAPTER_BREAK = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.chapterBreak) || 'page';
+  // Keep a chapter/subchapter heading with the block immediately following it.
+  // This prevents a heading from being left by itself at the bottom of a page.
+  // Disabled by default for backwards compatibility.
+  var KEEP_HEADINGS_WITH_NEXT = !!(window.$docsify && window.$docsify.print &&
+    window.$docsify.print.keepHeadingsWithNext);
   // TOC depth — read from the site's docsify settings in index.html:
   //   maxLevel    (default 4) — maximum nesting depth of TOC rows; sidebar
   //                             entries nested deeper are skipped entirely
@@ -393,6 +403,53 @@
     }
   }
 
+  function isHeading(node) {
+    return !!(node && node.nodeType === 1 && /^H[1-6]$/.test(node.tagName));
+  }
+
+  // Return the previous visible/content node, ignoring the indentation and
+  // line-break text nodes produced by rendered HTML.
+  function previousContentNode(node) {
+    var previous = node && node.previousSibling;
+    while (previous && (previous.nodeType === 8 ||
+        (previous.nodeType === 3 && !previous.nodeValue.trim()))) {
+      previous = previous.previousSibling;
+    }
+    return previous;
+  }
+
+  // If `child` follows one or more headings, return the first heading in that
+  // consecutive run. Moving the whole run avoids changing "h1, h2, paragraph"
+  // into a different kind of orphan. Return null when the run is already the
+  // first content on a fresh page: there is nowhere useful to move it to.
+  function headingRunToKeep(flow, child) {
+    var heading = previousContentNode(child);
+    if (!isHeading(heading)) return null;
+
+    var first = heading;
+    var previous = previousContentNode(first);
+    while (isHeading(previous)) {
+      first = previous;
+      previous = previousContentNode(first);
+    }
+    return previous ? first : null;
+  }
+
+  // Move every node from `first` through `last`, including whitespace nodes,
+  // out of its current flow and return them in document order.
+  function takeNodeRange(flow, first, last) {
+    var nodes = [];
+    var node = first;
+    while (node) {
+      var next = node.nextSibling;
+      nodes.push(node);
+      flow.removeChild(node);
+      if (node === last) break;
+      node = next;
+    }
+    return nodes;
+  }
+
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ..., back-page (body children in
      order). Every sheet except the cover and the back cover gets a footer
@@ -410,8 +467,11 @@
      (window.$docsify.print.chapterBreak):
        'page'    — each chapter starts on a fresh page (default)
        'onePage' — each chapter is scaled down to fit on exactly one page
-       'flow'    — no page break: chapters flow continuously */
-  function paginate(doc, mode) {
+       'flow'    — no page break: chapters flow continuously
+
+     When keepHeadingsWithNext is true, an h1-h6 is moved with the content
+     immediately following it if that content overflows the current sheet. */
+  function paginate(doc, mode, keepHeadingsWithNext) {
     var body = doc.body;
     // Capture the phase-1 sections first, then clear the body: the sections
     // are only needed as containers whose children get moved into sheets.
@@ -437,6 +497,13 @@
       }
 
       var isChapter = section.classList.contains('chapter');
+      var chapterOrder = isChapter ? chapterStarts.length : -1;
+      // Keep a marker on the chapter's first element so its actual starting
+      // page can be read after pagination. This matters when orphan prevention
+      // moves the chapter heading from a nearly-full sheet to the next one.
+      if (isChapter && section.firstElementChild) {
+        section.firstElementChild.setAttribute('data-print-chapter-order', String(chapterOrder));
+      }
       var children = Array.prototype.slice.call(section.childNodes);
       if (!children.length) children = [doc.createTextNode('')];
 
@@ -486,16 +553,36 @@
         // with childNodes.length > 1 so a single oversized element (e.g. a
         // very tall image) keeps its own sheet instead of looping forever.
         if (flow.scrollHeight > flow.clientHeight + 2 && flow.childNodes.length > 1) {
-          flow.removeChild(child);
+          // Optionally keep a heading (or a consecutive run of headings) with
+          // this overflowing block. Without this, the heading can be left as
+          // the final visible element on the previous sheet.
+          var firstToMove = keepHeadingsWithNext
+            ? headingRunToKeep(flow, child)
+            : null;
+          var nodesToMove = firstToMove
+            ? takeNodeRange(flow, firstToMove, child)
+            : [child];
+          if (!firstToMove) flow.removeChild(child);
+
           current = newSheet(doc);
           allSheets.push(current);
           body.appendChild(current); // attach so it can be measured
           flow = current.querySelector('.sheet-flow');
-          flow.appendChild(child);
+          nodesToMove.forEach(function (node) { flow.appendChild(node); });
         }
       });
 
       prevWasChapter = isChapter;
+    });
+
+    // A chapter heading can have moved to the next sheet to stay with its
+    // following content. Recalculate chapter starts from the markers so the
+    // table of contents always points to the heading's actual page.
+    doc.querySelectorAll('[data-print-chapter-order]').forEach(function (marker) {
+      var sheet = marker.closest('.page-sheet');
+      var order = parseInt(marker.getAttribute('data-print-chapter-order'), 10);
+      var index = allSheets.indexOf(sheet);
+      if (!isNaN(order) && index !== -1) chapterStarts[order] = index + 1;
     });
 
     // Number every sheet that is not a full-bleed cover or back-cover page.
@@ -632,7 +719,7 @@
       }
     }
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
-    var chapterStarts = paginate(doc, CHAPTER_BREAK);
+    var chapterStarts = paginate(doc, CHAPTER_BREAK, KEEP_HEADINGS_WITH_NEXT);
     fillToc(doc, chapters, chapterStarts);
     await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;
