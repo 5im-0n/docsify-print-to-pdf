@@ -32,6 +32,11 @@
  * at the bottom of a page is moved to the next page if the content immediately
  * following it does not fit beside it.
  *
+ * Long ul/ol lists and tables are split automatically between top-level list
+ * items and table rows. Table headers are not repeated by default; set
+ * window.$docsify.print.repeatTableHeaders to true to repeat a table's thead
+ * on each continuation page. Individual list items and rows remain intact.
+ *
  * The cover and back-cover images are configurable via
  * window.$docsify.print.coverUrl and window.$docsify.print.backUrl.
  * Both are optional: when not set, no cover page and no back page are
@@ -75,6 +80,11 @@
   // Disabled by default for backwards compatibility.
   var KEEP_HEADINGS_WITH_NEXT = !!(window.$docsify && window.$docsify.print &&
     window.$docsify.print.keepHeadingsWithNext);
+  // Long lists and tables are always split between top-level list items and
+  // table rows. Repeating a table's <thead> on continuation pages is optional
+  // and disabled by default.
+  var REPEAT_TABLE_HEADERS = !!(window.$docsify && window.$docsify.print &&
+    window.$docsify.print.repeatTableHeaders);
   // TOC depth — read from the site's docsify settings in index.html:
   //   maxLevel    (default 4) — maximum nesting depth of TOC rows; sidebar
   //                             entries nested deeper are skipped entirely
@@ -450,6 +460,117 @@
     return nodes;
   }
 
+  function isSplittableList(node) {
+    return !!(node && node.nodeType === 1 &&
+      (node.tagName === 'UL' || node.tagName === 'OL'));
+  }
+
+  function isSplittableTable(node) {
+    return !!(node && node.nodeType === 1 && node.tagName === 'TABLE');
+  }
+
+  // Remove IDs from cloned continuation markup. The original ID remains on
+  // the first fragment, while continuation lists/tables and repeated table
+  // headers avoid introducing duplicate IDs into the print document.
+  function removeIds(node) {
+    if (!node || node.nodeType !== 1) return;
+    node.removeAttribute('id');
+    node.querySelectorAll('[id]').forEach(function (withId) {
+      withId.removeAttribute('id');
+    });
+  }
+
+  // Calculate the marker value of every top-level <li>. Continuation <ol>
+  // fragments use these values as their `start`, preserving numbering,
+  // including custom start/value attributes and reversed lists.
+  function listItemsWithNumbers(list) {
+    var items = Array.prototype.filter.call(list.children, function (child) {
+      return child.tagName === 'LI';
+    });
+    if (list.tagName !== 'OL') {
+      return items.map(function (item) { return { node: item, number: null }; });
+    }
+
+    var reversed = list.hasAttribute('reversed');
+    var start = parseInt(list.getAttribute('start'), 10);
+    var next = isNaN(start) ? (reversed ? items.length : 1) : start;
+    return items.map(function (item) {
+      var value = parseInt(item.getAttribute('value'), 10);
+      if (!isNaN(value)) next = value;
+      var result = { node: item, number: next };
+      next += reversed ? -1 : 1;
+      return result;
+    });
+  }
+
+  // Return table rows grouped by their direct tbody/tfoot parent. The thead
+  // is kept as a header and may optionally be cloned onto continuation pages.
+  // Rows inside nested tables are deliberately ignored.
+  function tableRowGroups(table) {
+    var groups = [];
+    Array.prototype.forEach.call(table.children, function (child) {
+      if (child.tagName === 'TBODY' || child.tagName === 'TFOOT') {
+        var rows = Array.prototype.filter.call(child.children, function (row) {
+          return row.tagName === 'TR';
+        });
+        if (rows.length) groups.push({ template: child, rows: rows });
+      } else if (child.tagName === 'TR') {
+        groups.push({ template: null, rows: [child] });
+      }
+    });
+    return groups;
+  }
+
+  function createTableFragment(doc, source, header, includeHeader, includeCaption) {
+    var table = source.cloneNode(false);
+    removeIds(table);
+    Array.prototype.forEach.call(source.children, function (child) {
+      // Column definitions are needed on every fragment to preserve widths.
+      // A caption belongs only to the first fragment; the header is controlled
+      // separately because repeating it is configurable.
+      if (child.tagName === 'COLGROUP' ||
+          (includeCaption && child.tagName === 'CAPTION') ||
+          (includeHeader && child === header)) {
+        var clone = child.cloneNode(true);
+        removeIds(clone);
+        table.appendChild(clone);
+      }
+    });
+    return table;
+  }
+
+  function hasUsefulContentBefore(node, keepHeadingsWithNext) {
+    var previous = previousContentNode(node);
+    if (!previous) return false;
+    if (!keepHeadingsWithNext || !isHeading(previous)) return true;
+
+    // A heading run that starts a fresh page cannot usefully be moved again.
+    // In that case an oversized first item/row stays with it and may overflow.
+    var first = previous;
+    var before = previousContentNode(first);
+    while (isHeading(before)) {
+      first = before;
+      before = previousContentNode(first);
+    }
+    return !!before;
+  }
+
+  function appendTableRow(table, groupTemplate, groupIndex, row) {
+    if (!groupTemplate) {
+      table.appendChild(row);
+      return;
+    }
+    var group = table.lastElementChild;
+    var key = String(groupIndex);
+    if (!group || group.getAttribute('data-print-row-group') !== key) {
+      group = groupTemplate.cloneNode(false);
+      removeIds(group);
+      group.setAttribute('data-print-row-group', key);
+      table.appendChild(group);
+    }
+    group.appendChild(row);
+  }
+
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ..., back-page (body children in
      order). Every sheet except the cover and the back cover gets a footer
@@ -470,8 +591,12 @@
        'flow'    — no page break: chapters flow continuously
 
      When keepHeadingsWithNext is true, an h1-h6 is moved with the content
-     immediately following it if that content overflows the current sheet. */
-  function paginate(doc, mode, keepHeadingsWithNext) {
+     immediately following it if that content overflows the current sheet.
+
+     Lists and tables are always split between top-level list items/table rows.
+     Individual items/rows stay intact; repeatTableHeaders controls whether a
+     table's thead is copied to each continuation page. */
+  function paginate(doc, mode, keepHeadingsWithNext, repeatTableHeaders) {
     var body = doc.body;
     // Capture the phase-1 sections first, then clear the body: the sections
     // are only needed as containers whose children get moved into sheets.
@@ -541,35 +666,178 @@
         chapterStarts.push(current ? allSheets.length : allSheets.length + 1);
       }
 
-      children.forEach(function (child) {
-        if (!current) {
-          current = newSheet(doc);
-          allSheets.push(current);
-          body.appendChild(current); // attach so it can be measured
-          flow = current.querySelector('.sheet-flow');
-        }
+      function startSheet() {
+        current = newSheet(doc);
+        allSheets.push(current);
+        body.appendChild(current); // attach so it can be measured
+        flow = current.querySelector('.sheet-flow');
+      }
+
+      function appendWholeBlock(child) {
         flow.appendChild(child);
         // Too tall for the remaining page? Move it to a fresh sheet. Guard
         // with childNodes.length > 1 so a single oversized element (e.g. a
         // very tall image) keeps its own sheet instead of looping forever.
-        if (flow.scrollHeight > flow.clientHeight + 2 && flow.childNodes.length > 1) {
-          // Optionally keep a heading (or a consecutive run of headings) with
-          // this overflowing block. Without this, the heading can be left as
-          // the final visible element on the previous sheet.
-          var firstToMove = keepHeadingsWithNext
-            ? headingRunToKeep(flow, child)
-            : null;
-          var nodesToMove = firstToMove
-            ? takeNodeRange(flow, firstToMove, child)
-            : [child];
-          if (!firstToMove) flow.removeChild(child);
+        if (flow.scrollHeight <= flow.clientHeight + 2 || flow.childNodes.length <= 1) return;
 
-          current = newSheet(doc);
-          allSheets.push(current);
-          body.appendChild(current); // attach so it can be measured
-          flow = current.querySelector('.sheet-flow');
-          nodesToMove.forEach(function (node) { flow.appendChild(node); });
+        // Optionally keep a heading (or a consecutive run of headings) with
+        // this overflowing block. Without this, the heading can be left as
+        // the final visible element on the previous sheet.
+        var firstToMove = keepHeadingsWithNext
+          ? headingRunToKeep(flow, child)
+          : null;
+        var nodesToMove = firstToMove
+          ? takeNodeRange(flow, firstToMove, child)
+          : [child];
+        if (!firstToMove) flow.removeChild(child);
+        startSheet();
+        nodesToMove.forEach(function (node) { flow.appendChild(node); });
+      }
+
+      function appendList(list) {
+        var entries = listItemsWithNumbers(list);
+        // An empty list has nothing useful to split.
+        if (!entries.length) {
+          appendWholeBlock(list);
+          return;
         }
+
+        entries.forEach(function (entry) { list.removeChild(entry.node); });
+        var fragment = list;
+        flow.appendChild(fragment);
+
+        entries.forEach(function (entry, index) {
+          // Items begin inside the source list. Re-append them in order so the
+          // same overflow logic works for both the first and later fragments.
+          fragment.appendChild(entry.node);
+          if (flow.scrollHeight <= flow.clientHeight + 2) return;
+
+          fragment.removeChild(entry.node);
+          // If no item fitted, move the heading run and empty list shell off
+          // this page before retrying. This keeps a heading with the first item
+          // rather than with the complete (possibly multi-page) list.
+          if (index === 0 && fragment.children.length === 0) {
+            var firstToMove = keepHeadingsWithNext
+              ? headingRunToKeep(flow, fragment)
+              : null;
+            // If the heading already starts a fresh page, moving only an
+            // oversized first item would orphan it. Keep both together and
+            // allow that indivisible item to overflow instead.
+            if (keepHeadingsWithNext && !firstToMove &&
+                isHeading(previousContentNode(fragment))) {
+              fragment.appendChild(entry.node);
+              return;
+            }
+            var headingNodes = firstToMove
+              ? takeNodeRange(flow, firstToMove, fragment)
+              : [];
+            if (firstToMove) headingNodes.pop(); // discard the empty list shell
+            else flow.removeChild(fragment);
+            startSheet();
+            headingNodes.forEach(function (node) { flow.appendChild(node); });
+          } else {
+            startSheet();
+          }
+
+          fragment = list.cloneNode(false);
+          removeIds(fragment);
+          if (fragment.tagName === 'OL') fragment.setAttribute('start', String(entry.number));
+          flow.appendChild(fragment);
+          fragment.appendChild(entry.node);
+          // A single item taller than a page deliberately remains intact and
+          // may overflow, as configured; the following item starts fresh.
+          if (flow.scrollHeight > flow.clientHeight + 2 && index < entries.length - 1 &&
+              hasUsefulContentBefore(fragment, keepHeadingsWithNext)) {
+            startSheet();
+            fragment = list.cloneNode(false);
+            removeIds(fragment);
+            if (fragment.tagName === 'OL') {
+              fragment.setAttribute('start', String(entries[index + 1].number));
+            }
+            flow.appendChild(fragment);
+          }
+        });
+
+        // Avoid leaving an empty continuation shell after an oversized item.
+        if (!fragment.children.length && fragment.parentNode) {
+          fragment.parentNode.removeChild(fragment);
+        }
+      }
+
+      function appendTable(table) {
+        var header = Array.prototype.find.call(table.children, function (child) {
+          return child.tagName === 'THEAD';
+        });
+        var groups = tableRowGroups(table);
+        if (!groups.length) {
+          appendWholeBlock(table);
+          return;
+        }
+
+        // Move rows out before attaching the original table: it is the first
+        // fragment, preserving captions, colgroups, IDs and other attributes.
+        groups.forEach(function (group) {
+          group.rows.forEach(function (row) { row.parentNode.removeChild(row); });
+          if (group.template && !group.template.children.length && group.template.parentNode) {
+            group.template.parentNode.removeChild(group.template);
+          }
+        });
+        var fragment = table;
+        flow.appendChild(fragment);
+        var rowsAdded = 0;
+
+        groups.forEach(function (group, groupIndex) {
+          group.rows.forEach(function (row) {
+            appendTableRow(fragment, group.template, groupIndex, row);
+            if (flow.scrollHeight <= flow.clientHeight + 2) {
+              rowsAdded++;
+              return;
+            }
+
+            var rowParent = row.parentNode;
+            rowParent.removeChild(row);
+            if (rowParent !== fragment && !rowParent.children.length) {
+              fragment.removeChild(rowParent);
+            }
+
+            // As with lists, keep a preceding heading only with the first row.
+            if (rowsAdded === 0) {
+              var firstToMove = keepHeadingsWithNext
+                ? headingRunToKeep(flow, fragment)
+                : null;
+              // Keep a fresh-page heading with an indivisible oversized first
+              // row, even though that row may overflow the page.
+              if (keepHeadingsWithNext && !firstToMove &&
+                  isHeading(previousContentNode(fragment))) {
+                appendTableRow(fragment, group.template, groupIndex, row);
+                rowsAdded++;
+                return;
+              }
+              var headingNodes = firstToMove
+                ? takeNodeRange(flow, firstToMove, fragment)
+                : [];
+              if (firstToMove) headingNodes.pop(); // discard the header-only table shell
+              else flow.removeChild(fragment);
+              startSheet();
+              headingNodes.forEach(function (node) { flow.appendChild(node); });
+            } else {
+              startSheet();
+            }
+
+            fragment = createTableFragment(doc, table, header,
+              repeatTableHeaders || rowsAdded === 0, rowsAdded === 0);
+            flow.appendChild(fragment);
+            appendTableRow(fragment, group.template, groupIndex, row);
+            rowsAdded++;
+          });
+        });
+      }
+
+      children.forEach(function (child) {
+        if (!current) startSheet();
+        if (isSplittableList(child)) appendList(child);
+        else if (isSplittableTable(child)) appendTable(child);
+        else appendWholeBlock(child);
       });
 
       prevWasChapter = isChapter;
@@ -719,7 +987,8 @@
       }
     }
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
-    var chapterStarts = paginate(doc, CHAPTER_BREAK, KEEP_HEADINGS_WITH_NEXT);
+    var chapterStarts = paginate(doc, CHAPTER_BREAK, KEEP_HEADINGS_WITH_NEXT,
+      REPEAT_TABLE_HEADERS);
     fillToc(doc, chapters, chapterStarts);
     await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;

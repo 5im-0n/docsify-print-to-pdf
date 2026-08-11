@@ -11,6 +11,8 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
 - **Optional orphan-heading prevention** — `print.keepHeadingsWithNext` moves an `h1`–`h6` to the following page when the content immediately after it cannot fit on the same page.
+- **List and table pagination** — long lists split between top-level items and long tables split between rows instead of leaving most of the preceding page blank. Ordered-list numbering continues correctly.
+- **Optional repeated table headers** — `print.repeatTableHeaders` repeats `<thead>` on table continuation pages when enabled.
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
 
 ## Requirements
@@ -66,7 +68,8 @@ window.$docsify = {
     coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
     chapterBreak: 'page',           // how chapters start in the exported PDF
-    keepHeadingsWithNext: true      // prevent a heading from being orphaned at a page bottom
+    keepHeadingsWithNext: true,     // prevent a heading from being orphaned at a page bottom
+    repeatTableHeaders: false       // repeat <thead> on continuation pages (default: false)
   }
 };
 ```
@@ -125,6 +128,28 @@ print: {
 ```
 
 Default: `false` (existing pagination behaviour is preserved unless this option is enabled). The option does not change the `'onePage'` mode, because that mode scales the complete chapter onto one sheet.
+
+### List and table pagination
+
+In the normal `'page'` and `'flow'` modes, long lists and tables are split automatically; no option is required:
+
+- `<ul>` and `<ol>` split between top-level `<li>` elements. Nested lists stay with their parent item.
+- Ordered-list numbering is preserved across continuation pages, including `start`, `value`, and `reversed` numbering.
+- Tables split between rows in `<tbody>` and `<tfoot>`.
+- An individual list item or table row is never split internally. If one is taller than a complete page, it remains intact and may overflow that page.
+- With `keepHeadingsWithNext: true`, a heading is kept with the first list item or table row, not with the entire multi-page list or table.
+
+### `print.repeatTableHeaders`
+
+Set this to `true` to repeat a table's `<thead>` on every continuation page:
+
+```js
+print: {
+  repeatTableHeaders: true
+}
+```
+
+Default: `false`. The header remains on the table's first page but is not copied to continuation pages.
 
 ### `maxLevel` and `subMaxLevel`
 
