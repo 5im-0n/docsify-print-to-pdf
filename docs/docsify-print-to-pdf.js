@@ -70,9 +70,9 @@
     style.textContent =
       '#print-pdf-btn{position:fixed;right:16px;bottom:16px;z-index:99999;' +
       'padding:11px 18px;border:none;border-radius:8px;cursor:pointer;' +
-      'background:#42b983;color:#fff;font:600 14px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;' +
+      'background:var(--theme-color,#42b983);color:#fff;font:600 14px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;' +
       'box-shadow:0 2px 10px rgba(0,0,0,.28);transition:background .15s ease}' +
-      '#print-pdf-btn:hover{background:#369f6e}' +
+      '#print-pdf-btn:hover{background:var(--theme-color-dark,#369f6e)}' +
       '#print-pdf-btn:active{transform:translateY(1px)}';
     document.head.appendChild(style);
 
@@ -151,6 +151,26 @@
   }
 
   /* ------------------------------------------------------------- assembly */
+
+  /* Copy the site's --theme-* custom properties (e.g. --theme-color) onto the
+     print document's :root. The PDF is assembled in a standalone same-origin
+     iframe, which does not inherit CSS variables from the hosting page, so
+     this re-declares them there; every var(--theme-*) in styles() then
+     resolves to the site's actual docsify theme, with the docsify defaults
+     (vue.css) as fallbacks. */
+  function themeRoot() {
+    var computed = getComputedStyle(document.documentElement);
+    var props = [];
+    for (var i = 0; i < computed.length; i++) {
+      var name = computed[i];
+      if (name.indexOf('--theme') === 0) {
+        var value = computed.getPropertyValue(name).trim();
+        if (value) props.push(name + ':' + value);
+      }
+    }
+    return props.length ? ':root{' + props.join(';') + '}' : '';
+  }
+
   function styles() {
     return [
       /* A4, zero margins. Every page of the PDF is an explicit .sheet /
@@ -160,7 +180,8 @@
       '@page{size:A4;margin:0}',
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
       'html,body{margin:0;padding:0}',
-      'body{font:12pt/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#333}',
+      'body{font:12pt/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;' +
+        'color:var(--theme-text-color,#34495e)}',
       /* --- cover (page 1, full-bleed, no footer) --- */
       '.cover-page{position:relative;width:210mm;height:297mm;overflow:hidden;' +
         'page-break-after:always;break-after:page}',
@@ -195,8 +216,9 @@
          are scoped with .sheet-flow to win over the generic .sheet-flow h1
          and .sheet-flow ul rules (otherwise the list gets indented 24px and
          the title is restyled by the chapter h1 rule). */
-      '.sheet-flow .toc-title{font-size:26pt;font-weight:700;color:#2c3e50;' +
-        'margin:0 0 26px;padding-bottom:10px;border-bottom:2px solid #42b983}',
+      '.sheet-flow .toc-title{font-size:26pt;font-weight:700;' +
+        'color:var(--theme-heading-color,#2c3e50);margin:0 0 26px;' +
+        'padding-bottom:10px;border-bottom:2px solid var(--theme-color,#42b983)}',
       '.sheet-flow .toc-list{list-style:none;margin:0;padding:0}',
       /* Every chapter is one uniform row: title on the left, page number
          pushed to the right edge of the row. No size/weight differences and
@@ -204,31 +226,40 @@
          parent, like in the sidebar (the whole row shifts — number and title
          together). */
       '.sheet-flow .toc-list li{display:flex;align-items:baseline;gap:12px;' +
-        'padding:6px 0;font-size:13pt;color:#2c3e50}',
+        'padding:6px 0;font-size:13pt;color:var(--theme-heading-color,#2c3e50)}',
       '.sheet-flow .toc-list li.toc-sub{padding-left:16mm}',
       '.sheet-flow .toc-list .toc-no{margin-left:auto;flex:0 0 14mm;' +
-        'text-align:right;font-weight:600;color:#42b983;' +
+        'text-align:right;font-weight:600;color:var(--theme-color,#42b983);' +
         'font-variant-numeric:tabular-nums}',
       /* --- chapters --- */
       '.sheet-flow h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
-        'border-bottom:2px solid #42b983;color:#2c3e50}',
-      '.sheet-flow h2{font-size:16pt;margin:24px 0 8px;color:#2c3e50}',
-      '.sheet-flow h3{font-size:13pt;margin:18px 0 6px;color:#2c3e50}',
+        'border-bottom:2px solid var(--theme-color,#42b983);' +
+        'color:var(--theme-heading-color,#2c3e50)}',
+      '.sheet-flow h2{font-size:16pt;margin:24px 0 8px;' +
+        'color:var(--theme-heading-color,#2c3e50)}',
+      '.sheet-flow h3{font-size:13pt;margin:18px 0 6px;' +
+        'color:var(--theme-heading-color,#2c3e50)}',
       '.sheet-flow p{margin:0 0 10px}',
-      '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;border-left:4px solid #42b983;' +
-        'background:#f6faf8;color:#555;border-radius:0 6px 6px 0}',
+      '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;' +
+        'border-left:4px solid var(--theme-blockquote-border,var(--theme-color,#42b983));' +
+        'background:var(--theme-blockquote-background,#f6faf8);' +
+        'color:var(--theme-blockquote-color,#858585);border-radius:0 6px 6px 0}',
       '.sheet-flow blockquote p{margin:0}',
       '.sheet-flow ul,.sheet-flow ol{margin:0 0 10px;padding-left:24px}',
-      '.sheet-flow pre{background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;' +
-        'padding:12px;overflow:auto;font:10pt/1.5 "Courier New",monospace}',
-      '.sheet-flow code{font-family:"Courier New",monospace;background:#f6f8fa;' +
-        'padding:1px 5px;border-radius:4px;font-size:10.5pt}',
-      '.sheet-flow pre code{background:none;padding:0}',
+      '.sheet-flow pre{background:var(--theme-code-background,#f8f8f8);' +
+        'border:1px solid #e1e4e8;border-radius:6px;padding:12px;overflow:auto;' +
+        'font:10pt/1.5 "Courier New",monospace}',
+      '.sheet-flow code{font-family:"Courier New",monospace;' +
+        'background:var(--theme-code-background,#f8f8f8);padding:1px 5px;' +
+        'border-radius:4px;font-size:10.5pt}',
+      '.sheet-flow pre code{background:none;padding:0;' +
+        'color:var(--theme-code-color,#525252)}',
       '.sheet-flow table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11pt}',
-      '.sheet-flow th,.sheet-flow td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}',
-      '.sheet-flow th{background:#f6f8fa}',
+      '.sheet-flow th,.sheet-flow td{border:1px solid var(--theme-table-border-color,#ddd);' +
+        'padding:6px 10px;text-align:left}',
+      '.sheet-flow th{background:var(--theme-table-th-background,#f8f8f8)}',
       '.sheet-flow img{max-width:100%;border-radius:4px}',
-      '.sheet-flow hr{border:none;border-top:1px solid #e1e4e8;margin:20px 0}'
+      '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}'
     ].join('\n');
   }
 
@@ -280,7 +311,7 @@
       '<!DOCTYPE html>',
       '<html><head><meta charset="utf-8">',
       '<title>' + PROJECT + ' — PDF</title>',
-      '<style>' + styles() + '</style>',
+      '<style>' + themeRoot() + styles() + '</style>',
       '</head><body>',
       cover,
       tocHtml(chapters),
