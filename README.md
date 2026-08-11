@@ -7,7 +7,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **One click, whole document** — reads `_sidebar.md` to learn the chapters (title, order and nesting) and renders every chapter into one printable document.
 - **Optional cover page** — if you set `print.coverUrl`, the image is used as a full-bleed cover with the project name (taken from `window.$docsify.name`). When not set, no cover page is inserted.
 - **Optional back cover page** — if you set `print.backUrl`, a full-bleed image page is appended at the end of the PDF. When not set, no back page is inserted.
-- **Table of contents** — lists every chapter with its starting page number on the right; nested chapters are indented under their parent, exactly like the sidebar.
+- **Table of contents** — lists every chapter (from the sidebar) with its starting page number on the right, plus the sub-headings (`##`, `###`, …) of each chapter's markdown file with their page numbers; rows are indented under their parent exactly like the sidebar, and the depth follows the site's `maxLevel` / `subMaxLevel` settings (see [Configuration](#configuration)).
 - **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
@@ -111,10 +111,25 @@ How chapters start in the exported PDF:
 | `'onePage'`| every chapter is scaled down to fit on exactly one page (slide-deck style) |
 | `'flow'`   | no page break — chapters flow continuously, content continues on the same page |
 
+### `maxLevel` and `subMaxLevel`
+
+The depth of the table of contents follows the standard Docsify settings in `index.html` (top level of `window.$docsify`, not inside `print`):
+
+```js
+window.$docsify = {
+  loadSidebar: true,
+  maxLevel: 4,
+  subMaxLevel: 2
+};
+```
+
+- `maxLevel` (default `4`) — the maximum nesting depth of TOC rows. Sidebar entries nested deeper are skipped entirely, and sub-headings are capped so their total depth never exceeds it.
+- `subMaxLevel` (default `2`) — how many heading levels below the chapter title are listed from each markdown file: `2` lists `##` and `###`, `1` only `##`, `0` disables sub-headings (chapters only, as before).
+
 ## How it works
 
-1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth).
-2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document).
+1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth, capped by `maxLevel`).
+2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document) and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
 3. Assembles a document: (optional) full-bleed cover (`print.coverUrl`) → table of contents → all chapters → (optional) full-bleed back cover (`print.backUrl`). If `coverUrl` or `backUrl` is not set, the corresponding page is left out and the page numbers adjust accordingly.
 4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every page except the cover and the back cover (so without a cover, the TOC is page 1).
 5. Renders the result in a hidden same-origin iframe and triggers `print()`, so the user can save it as a PDF.

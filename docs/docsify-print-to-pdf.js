@@ -12,7 +12,9 @@
  *      page except the cover and the back cover; the TOC lists every chapter
  *      as a uniform row with its starting page number on the right of each
  *      row (nested chapters are indented under their parent, like in the
- *      sidebar)
+ *      sidebar) plus the sub-headings (h2/h3/...) of each chapter's markdown
+ *      file, indented under their chapter — the depth follows the site's
+ *      maxLevel / subMaxLevel settings in index.html
  *   4. opens it in a hidden same-origin iframe and calls the browser's print
  *      dialog so the user can "Save as PDF".
  *
@@ -63,6 +65,16 @@
   //   'flow'              — no page break, chapters flow continuously
   var CHAPTER_BREAK = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.chapterBreak) || 'page';
+  // TOC depth — read from the site's docsify settings in index.html:
+  //   maxLevel    (default 4) — maximum nesting depth of TOC rows; sidebar
+  //                             entries nested deeper are skipped entirely
+  //   subMaxLevel (default 2) — heading levels below the chapter title to
+  //                             list from each markdown file (2 = h2 and h3,
+  //                             1 = only h2, 0 = chapters only, as before)
+  var MAX_LEVEL = (window.$docsify && typeof window.$docsify.maxLevel === 'number')
+    ? window.$docsify.maxLevel : 4;
+  var SUB_MAX_LEVEL = (window.$docsify && typeof window.$docsify.subMaxLevel === 'number')
+    ? window.$docsify.subMaxLevel : 2;
 
   /* ---------------------------------------------------------------- button */
   function makeButton() {
@@ -113,6 +125,9 @@
         depth: Math.floor(m[1].length / 2)
       });
     }
+    // Respect the site's maxLevel: entries nested deeper than that are not
+    // listed in the TOC (and their files are not rendered at all).
+    chapters = chapters.filter(function (c) { return c.depth < MAX_LEVEL; });
     if (!chapters.length) throw new Error('No chapters found in _sidebar.md');
     return chapters;
   }
@@ -172,7 +187,7 @@
   }
 
   function styles() {
-    return [
+    var css = [
       /* A4, zero margins. Every page of the PDF is an explicit .sheet /
          .page-sheet element exactly 210x297mm, so one sheet == one printed
          page and the page-number footer (a real element inside each sheet)
@@ -219,16 +234,23 @@
       '.sheet-flow .toc-title{font-size:26pt;font-weight:700;' +
         'color:var(--theme-heading-color,#2c3e50);margin:0 0 26px;' +
         'padding-bottom:10px;border-bottom:2px solid var(--theme-color,#42b983)}',
-      '.sheet-flow .toc-list{list-style:none;margin:0;padding:0}',
-      /* Every chapter is one uniform row: title on the left, page number
-         pushed to the right edge of the row. No size/weight differences and
-         no separators between rows. Nested chapters are indented under their
-         parent, like in the sidebar (the whole row shifts — number and title
-         together). */
-      '.sheet-flow .toc-list li{display:flex;align-items:baseline;gap:12px;' +
+      /* Every row is uniform: title on the left, page number pushed to the
+         right edge of the row. No size/weight differences and no separators
+         between rows. Rows are indented per nesting level via data-depth
+         (rules generated below): chapters by their sidebar depth, sub-heading
+         rows by chapter depth + heading level - 1 (the whole row shifts —
+         number and title together).
+         Rows are plain divs (no <ul> wrapper) on purpose: paginate() slices a
+         section's children across sheets, so each row must be its own child
+         for a long TOC to span several pages instead of being clipped. */
+      '.sheet-flow .toc-row{display:flex;align-items:baseline;gap:12px;' +
         'padding:6px 0;font-size:13pt;color:var(--theme-heading-color,#2c3e50)}',
-      '.sheet-flow .toc-list li.toc-sub{padding-left:16mm}',
-      '.sheet-flow .toc-list .toc-no{margin-left:auto;flex:0 0 14mm;' +
+      /* The leader is the subtle dotted line between the title and the page
+         number; it stretches (flex:1) to fill the space and its bottom edge
+         (an empty flex item's baseline) sits right on the text baseline. */
+      '.sheet-flow .toc-row .toc-leader{flex:1 1 auto;min-width:6mm;' +
+        'border-bottom:1px dotted #b9b9b9;height:0}',
+      '.sheet-flow .toc-row .toc-no{flex:0 0 14mm;' +
         'text-align:right;font-weight:600;color:var(--theme-color,#42b983);' +
         'font-variant-numeric:tabular-nums}',
       /* --- chapters --- */
@@ -260,30 +282,52 @@
       '.sheet-flow th{background:var(--theme-table-th-background,#f8f8f8)}',
       '.sheet-flow img{max-width:100%;border-radius:4px}',
       '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}'
-    ].join('\n');
+    ];
+    // One indent step per nesting level (8mm each — half of the original
+    // 16mm), so nested rows line up under their parent like in the sidebar
+    // without eating too much width.
+    for (var d = 0; d <= MAX_LEVEL; d++) {
+      css.push('.sheet-flow .toc-row[data-depth="' + d + '"]{padding-left:' +
+        (d * 8) + 'mm}');
+    }
+    return css.join('\n');
   }
 
   function tocHtml(chapters) {
-    // Rows are rendered with an empty .toc-no span; the starting page number
-    // of each chapter is only known after pagination, so fillToc() writes it
-    // in afterwards (the span keeps its fixed width either way, so filling it
-    // in does not change the layout).
-    var items = chapters.map(function (ch) {
-      // Nested chapters get an indent class so they line up under their
-      // parent (same font size/style as every other row).
-      var cls = ch.depth > 0 ? ' class="toc-sub"' : '';
-      // Title first, number last: with margin-left:auto on .toc-no the
-      // number is pushed to the right edge of the row while the title stays
-      // anchored at the left (if the number came first, the auto margin
-      // would push the whole row — number AND title — to the right).
-      return '<li' + cls + '>' +
+    // Rows are rendered with an empty .toc-no span; the page numbers are
+    // only known after pagination, so fillToc() writes them in afterwards
+    // (the span keeps its fixed width either way, so filling it in does not
+    // change the layout). Every row carries a data-toc-target that fillToc()
+    // uses to look up its page number: "ch:<i>" for chapters (by sidebar
+    // index), "sec:<order>" for sub-headings (the data-toc-order stamped on
+    // the heading element in build()).
+    // Rows are emitted as plain divs without a <ul> wrapper so paginate()
+    // can split a long TOC across several sheets row by row (a single <ul>
+    // is one atomic child that cannot be split and would be clipped).
+    var items = '';
+    chapters.forEach(function (ch, i) {
+      // Chapter row — title and nesting depth from the sidebar.
+      items += '<div class="toc-row" data-depth="' + ch.depth + '" ' +
+        'data-toc-target="ch:' + i + '">' +
         '<span class="toc-name">' + escapeHtml(ch.title) + '</span>' +
+        '<span class="toc-leader"></span>' +
         '<span class="toc-no"></span>' +
-        '</li>';
-    }).join('');
+        '</div>';
+      // Sub-heading rows — collected from the chapter's markdown file in
+      // build() (h2..h(subMaxLevel+1)), indented under the chapter by their
+      // heading level: h2 = one step, h3 = two steps, etc.
+      (ch.sections || []).forEach(function (sec) {
+        items += '<div class="toc-row" data-depth="' + (ch.depth + sec.level - 1) + '" ' +
+          'data-toc-target="sec:' + sec.order + '">' +
+          '<span class="toc-name">' + escapeHtml(sec.title) + '</span>' +
+          '<span class="toc-leader"></span>' +
+          '<span class="toc-no"></span>' +
+          '</div>';
+      });
+    });
     return '<section class="toc-page">' +
       '<h1 class="toc-title">' + escapeHtml(TOC_TITLE) + '</h1>' +
-      '<ul class="toc-list">' + items + '</ul>' +
+      items +
       '</section>';
   }
 
@@ -479,17 +523,30 @@
     return chapterStarts;
   }
 
-  /* After pagination, write each chapter's starting page number into the
-     matching TOC row. Rows and chapters are in the same order, and the
-     number sits on the right edge of every row, after the chapter title. */
-  function fillToc(doc, chapterStarts) {
-    // The .toc-page wrapper no longer exists at this point: paginate() moved
-    // the TOC's children into a sheet and rebuilt the body from sheets, so
-    // match the list directly.
-    var rows = doc.querySelectorAll('.toc-list li');
-    rows.forEach(function (row, i) {
+  /* After pagination, write the page number into every TOC row. Chapter
+     rows get their starting page from chapterStarts (in sidebar order);
+     sub-heading rows get the page of the sheet their heading element landed
+     on (found via the data-toc-order attribute stamped in build()). Rows
+     are matched by their data-toc-target, not by position, because chapters
+     and sub-headings are interleaved in the list. */
+  function fillToc(doc, chapters, chapterStarts) {
+    var pages = {};
+    chapters.forEach(function (ch, i) {
+      if (chapterStarts[i]) pages['ch:' + i] = chapterStarts[i];
+    });
+    // Sheets are body children in document order; the +1 matches the footer
+    // numbering (cover/back pages count as pages but get no footer), so a
+    // sub-heading's page always agrees with the printed footer.
+    doc.querySelectorAll('[data-toc-order]').forEach(function (h) {
+      var sheet = h.closest('.page-sheet');
+      if (!sheet) return;
+      var page = Array.prototype.indexOf.call(doc.body.children, sheet) + 1;
+      pages['sec:' + h.getAttribute('data-toc-order')] = page;
+    });
+    doc.querySelectorAll('.toc-row').forEach(function (row) {
       var no = row.querySelector('.toc-no');
-      if (no && chapterStarts[i]) no.textContent = String(chapterStarts[i]);
+      var target = row.getAttribute('data-toc-target');
+      if (no && target && pages[target]) no.textContent = String(pages[target]);
     });
   }
 
@@ -520,6 +577,10 @@
   async function build() {
     var chapters = await getChapters();
     var chunks = [];
+    // Counter for the data-toc-order attribute stamped on every sub-heading,
+    // so fillToc() can find the heading in the paginated document and read
+    // the page it landed on.
+    var tocOrder = 0;
     for (var i = 0; i < chapters.length; i++) {
       var ch = chapters[i];
       var res = await fetch(ch.file, { cache: 'no-cache' });
@@ -529,6 +590,26 @@
       holder.innerHTML = renderer().render(markdown);
       var dir = ch.file.indexOf('/') !== -1 ? ch.file.replace(/[^/]*$/, '') : '';
       absolutize(holder, dir);
+      // Sub-headings of this file (the h1 chapter title itself comes from
+      // the sidebar): h2..h(subMaxLevel+1), capped so the total nesting
+      // depth never exceeds maxLevel. Each one is stamped with a global
+      // data-toc-order so its page number can be found after pagination.
+      var sections = [];
+      var headings = holder.querySelectorAll('h1,h2,h3,h4,h5,h6');
+      headings.forEach(function (h) {
+        var level = parseInt(h.tagName.charAt(1), 10);
+        if (level === 1) return; // chapter title — not a TOC row of its own
+        if (level > SUB_MAX_LEVEL + 1) return; // deeper than subMaxLevel
+        if (ch.depth + level - 1 >= MAX_LEVEL) return; // deeper than maxLevel
+        sections.push({
+          title: h.textContent.trim(),
+          level: level,
+          order: tocOrder
+        });
+        h.setAttribute('data-toc-order', String(tocOrder));
+        tocOrder++;
+      });
+      ch.sections = sections;
       chunks.push('<section class="chapter">' + holder.innerHTML + '</section>');
     }
 
@@ -552,7 +633,7 @@
     }
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
     var chapterStarts = paginate(doc, CHAPTER_BREAK);
-    fillToc(doc, chapterStarts);
+    fillToc(doc, chapters, chapterStarts);
     await new Promise(function (r) { setTimeout(r, 100); }); // let pagination settle
     return frame;
   }
