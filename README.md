@@ -1,13 +1,14 @@
 # docsify-print-to-pdf
 
-A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles your entire documentation — cover page, table of contents and all chapters — into a single, properly paginated A4 document and opens the browser's print dialog so the user can **Save as PDF**.
+A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles your entire documentation — table of contents and all chapters, plus an optional cover page and back cover page — into a single, properly paginated A4 document and opens the browser's print dialog so the user can **Save as PDF**.
 
 ## Features
 
 - **One click, whole document** — reads `_sidebar.md` to learn the chapters (title, order and nesting) and renders every chapter into one printable document.
-- **Cover page** — uses `_media/cover.jpg` as a full-bleed cover with the project name (taken from `window.$docsify.name`).
+- **Optional cover page** — if you set `print.coverUrl`, the image is used as a full-bleed cover with the project name (taken from `window.$docsify.name`). When not set, no cover page is inserted.
+- **Optional back cover page** — if you set `print.backUrl`, a full-bleed image page is appended at the end of the PDF. When not set, no back page is inserted.
 - **Table of contents** — lists every chapter with its starting page number on the right; nested chapters are indented under their parent, exactly like the sidebar.
-- **Real page numbers** — every page except the cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
+- **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
 
@@ -15,7 +16,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 
 - A Docsify site with:
   - `loadSidebar: true` and a `_sidebar.md` listing the chapters (standard `- [Title](file)` syntax, indented with two spaces per nesting level).
-  - A cover image at `_media/cover.jpg` (relative to the site root).
+  - An **optional** cover image (via `print.coverUrl`) and an **optional** back-cover image (via `print.backUrl`) — if neither is set, the PDF simply starts with the table of contents and ends after the last chapter (see [Configuration](#configuration)).
   - [markdown-it](https://github.com/markdown-it/markdown-it) loaded on the page — the plugin uses it to render the markdown of each chapter.
 
 ## Usage
@@ -37,7 +38,7 @@ Copy `docs/docsify-print-to-pdf.js` into your site (or load it from a CDN, see b
 
 A green **Print to PDF** button appears in the bottom-right corner of every page. Click it to:
 
-1. build the printable document (cover + table of contents + all chapters),
+1. build the printable document ((optional) cover + table of contents + all chapters + (optional) back cover),
 2. render it in a hidden same-origin iframe,
 3. open the browser's print dialog — choose **Save as PDF** (and disable headers/footers in the print dialog for the cleanest result).
 
@@ -57,18 +58,48 @@ The plugin reads a `print` object from `window.$docsify` in `index.html`:
 
 ```js
 window.$docsify = {
-  name: 'My Project',          // used on the cover page
+  name: 'My Project',          // used on the cover page (if any)
   loadSidebar: true,
   print: {
     tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
+    coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
+    backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
     chapterBreak: 'page'            // how chapters start in the exported PDF
   }
 };
 ```
 
+Both `coverUrl` and `backUrl` are **optional**: when either is not set, the corresponding page is simply not inserted into the PDF.
+
 ### `print.tocTitle`
 
 The heading of the table of contents page. Default: `'Table of Contents'`.
+
+### `print.coverUrl`
+
+The cover image of the exported PDF. **Optional** — when not set, no cover page is inserted and the document starts with the table of contents. Any relative path (resolved against the site root) or an absolute URL (`https://…`, `data:`) works:
+
+```js
+print: {
+  coverUrl: 'https://example.com/images/cover.png'
+}
+```
+
+Set it to `null`, `false` or `''` to explicitly disable the cover page (same as omitting it).
+
+### `print.backUrl`
+
+Adds a full-bleed image page at the end of the PDF (a "back cover"). **Optional** — when not set, no back page is inserted and the document ends after the last chapter. Like `coverUrl`, any relative path or absolute URL works:
+
+```js
+print: {
+  backUrl: 'https://example.com/images/back.png'
+}
+```
+
+Set it to `null`, `false` or `''` to explicitly disable the back page (same as omitting it).
+
+> If the configured back image fails to load, the back page is left out automatically, so the PDF never contains a broken page. The back page (like the cover) gets no page-number footer.
 
 ### `print.chapterBreak`
 
@@ -84,8 +115,8 @@ How chapters start in the exported PDF:
 
 1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth).
 2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document).
-3. Assembles a document: full-bleed cover (`_media/cover.jpg`) → table of contents → all chapters.
-4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every page except the cover.
+3. Assembles a document: (optional) full-bleed cover (`print.coverUrl`) → table of contents → all chapters → (optional) full-bleed back cover (`print.backUrl`). If `coverUrl` or `backUrl` is not set, the corresponding page is left out and the page numbers adjust accordingly.
+4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every page except the cover and the back cover (so without a cover, the TOC is page 1).
 5. Renders the result in a hidden same-origin iframe and triggers `print()`, so the user can save it as a PDF.
 
 Explicit sheets are used because CSS `@page` margin boxes (`@bottom-right { content: counter(page) }`) are not supported by Chrome/Firefox "Save as PDF", and a `position: fixed` footer is printed only once by Chromium. Making each page a real element guarantees the page number appears on every page.
@@ -105,4 +136,4 @@ printPdf.print();   // open the print dialog for the last built document
 - **"markdown-it is not loaded"** — add `<script src="//cdn.jsdelivr.net/npm/markdown-it@13/dist/markdown-it.min.js"></script>` before the plugin.
 - **"Could not load _sidebar.md"** — make sure `loadSidebar: true` is set and the file exists next to `index.html`.
 - **"No chapters found in _sidebar.md"** — check that sidebar entries use the `- [Title](file)` syntax.
-- **Broken images in the PDF** — ensure `_media/cover.jpg` exists and chapter images use relative paths that resolve against the site URL.
+- **Broken images in the PDF** — if you configured `coverUrl`/`backUrl`, make sure the images exist and are reachable; a back image that fails to load is dropped automatically, and a missing cover simply means no cover page. Chapter images should use relative paths that resolve against the site URL.

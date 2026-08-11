@@ -3,13 +3,16 @@
  * On click it:
  *   1. reads _sidebar.md to learn the chapters (title + order, same as the sidebar)
  *   2. fetches every chapter markdown file and renders it with markdown-it
- *   3. assembles a printable document: cover page (_media/cover.jpg) + table of
- *      contents + all chapters, then paginates it into explicit 210x297mm
+ *   3. assembles a printable document: table of contents + all chapters, with
+ *      an optional full-bleed cover page (print.coverUrl) and an optional
+ *      full-bleed back cover page (print.backUrl) — if neither is configured,
+ *      neither is inserted — then paginates it into explicit 210x297mm
  *      "sheets" (one sheet = one printed page) and puts a real, absolutely
  *      positioned footer with the page number at the bottom-right of every
- *      page except the cover; the TOC lists every chapter as a uniform row
- *      with its starting page number on the right of each row (nested
- *      chapters are indented under their parent, like in the sidebar)
+ *      page except the cover and the back cover; the TOC lists every chapter
+ *      as a uniform row with its starting page number on the right of each
+ *      row (nested chapters are indented under their parent, like in the
+ *      sidebar)
  *   4. opens it in a hidden same-origin iframe and calls the browser's print
  *      dialog so the user can "Save as PDF".
  *
@@ -21,6 +24,11 @@
  *                         page (slide-deck style)
  *   'flow'              — no page break: chapters flow continuously, content
  *                         simply continues on the same page
+ *
+ * The cover and back-cover images are configurable via
+ * window.$docsify.print.coverUrl and window.$docsify.print.backUrl.
+ * Both are optional: when not set, no cover page and no back page are
+ * inserted into the PDF.
  *
  * Why explicit sheets instead of CSS?
  *   - CSS @page margin boxes (@bottom-right { content: counter(page) }) are not
@@ -39,6 +47,16 @@
   // in index.html (fallback: "Table of Contents").
   var TOC_TITLE = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.tocTitle) || 'Table of Contents';
+  // Cover image — configurable via $docsify.print.coverUrl in index.html.
+  // Optional: when not set (or set to null/false/''), no cover page is
+  // inserted into the PDF.
+  var COVER_URL = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.coverUrl) || null;
+  // Back-cover image — configurable via $docsify.print.backUrl in index.html.
+  // Optional: when not set (or set to null/false/''), no back page is
+  // inserted into the PDF.
+  var BACK_URL = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.backUrl) || null;
   // How chapters start in the PDF — window.$docsify.print.chapterBreak:
   //   'page'    (default) — every chapter starts on a new page
   //   'onePage'           — every chapter is scaled to fit on one page
@@ -62,7 +80,7 @@
     btn.id = 'print-pdf-btn';
     btn.type = 'button';
     btn.textContent = 'Print to PDF';
-    btn.title = 'Assemble all chapters + cover and open the print dialog (Save as PDF)';
+    btn.title = 'Assemble all chapters (and cover, if configured) and open the print dialog (Save as PDF)';
     btn.addEventListener('click', function () {
       run().catch(function (err) {
         alert('Could not build the PDF:\n' + err.message);
@@ -154,6 +172,14 @@
         'text-shadow:0 2px 14px rgba(0,0,0,.55)}',
       '.cover-subtitle{font-size:14pt;opacity:.95;margin-top:14px;' +
         'text-shadow:0 1px 8px rgba(0,0,0,.55)}',
+      /* --- back cover (last page, full-bleed, no footer) ---
+         No break-before here on purpose: the sheet before it already has
+         break-after:page, and combining break-after with a break-before on
+         the next element can make the print engine emit an extra blank page
+         before the back cover. The preceding sheet's break-after alone
+         guarantees the back cover still starts on its own fresh page. */
+      '.back-page{position:relative;width:210mm;height:297mm;overflow:hidden;background:#fff}',
+      '.back-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
       /* --- inner pages (table of contents + chapters) --- */
       '.page-sheet{position:relative;width:210mm;height:297mm;padding:20mm 18mm;' +
         'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
@@ -230,25 +256,36 @@
       '</section>';
   }
 
-  /* Phase 1 document: cover + toc + chapters laid out as plain stacked
-     sections (no explicit pages yet). paginate() then slices each section
-     into one-page sheets and adds the numbered footers. */
-  function pageHtml(coverUrl, chapters, chaptersHtml) {
+  /* Phase 1 document: (optional cover) + toc + chapters laid out as plain
+     stacked sections (no explicit pages yet). paginate() then slices each
+     section into one-page sheets and adds the numbered footers. The cover
+     page is only emitted when coverUrl is set; the back cover page only
+     when backUrl is set (it is dropped later if its image fails to load). */
+  function pageHtml(coverUrl, backUrl, chapters, chaptersHtml) {
+    var cover = coverUrl
+      ? '<div class="cover-page">' +
+        '<img class="cover-img" src="' + coverUrl + '" alt="">' +
+        '<div class="cover-content">' +
+        '<div class="cover-title">' + PROJECT + '</div>' +
+        '<div class="cover-subtitle">Project documentation</div>' +
+        '</div>' +
+        '</div>'
+      : '';
+    var back = backUrl
+      ? '<div class="back-page">' +
+        '<img class="back-img" src="' + backUrl + '" alt="">' +
+        '</div>'
+      : '';
     return [
       '<!DOCTYPE html>',
       '<html><head><meta charset="utf-8">',
       '<title>' + PROJECT + ' — PDF</title>',
       '<style>' + styles() + '</style>',
       '</head><body>',
-      '<div class="cover-page">',
-      '<img class="cover-img" src="' + coverUrl + '" alt="">',
-      '<div class="cover-content">',
-      '<div class="cover-title">' + PROJECT + '</div>',
-      '<div class="cover-subtitle">Project documentation</div>',
-      '</div>',
-      '</div>',
+      cover,
       tocHtml(chapters),
       chaptersHtml,
+      back,
       '</body></html>'
     ].join('\n');
   }
@@ -282,8 +319,9 @@
   }
 
   /* Slices the phase-1 sections into one-page sheets. Sections are:
-     cover-page, toc-page, chapter, chapter, ... (body children in order).
-     Every sheet except the cover gets a footer with its real page number.
+     cover-page, toc-page, chapter, chapter, ..., back-page (body children in
+     order). Every sheet except the cover and the back cover gets a footer
+     with its real page number.
      Returns the starting page number of each chapter section (in order) so
      the caller can fill the numbers into the table of contents.
 
@@ -311,6 +349,13 @@
     sections.forEach(function (section) {
       if (section.classList.contains('cover-page')) {
         allSheets.push(section); // page 1 — full-bleed, no footer
+        body.appendChild(section);
+        prevWasChapter = false;
+        return;
+      }
+
+      if (section.classList.contains('back-page')) {
+        allSheets.push(section); // last page — full-bleed, no footer
         body.appendChild(section);
         prevWasChapter = false;
         return;
@@ -378,18 +423,26 @@
       prevWasChapter = isChapter;
     });
 
-    // Number every page but the cover. The sheets are already in the body
-    // (they had to be attached during pagination so their heights could be
-    // measured), so only the footers are added here.
-    var pageNo = 1;
-    allSheets.forEach(function (sheet, idx) {
-      if (idx > 0) {
-        pageNo++;
-        var footer = doc.createElement('div');
-        footer.className = 'page-footer';
-        footer.textContent = String(pageNo);
-        sheet.appendChild(footer);
+    // Number every sheet that is not a full-bleed cover or back-cover page.
+    // The page counter counts every sheet (so with a cover, the TOC is
+    // page 2), but footers are only placed on non-cover/non-back sheets.
+    // Previously the first sheet was skipped via "idx > 0" because the cover
+    // was always present; now that the cover is optional, skip by class so
+    // the numbering stays correct (TOC = page 1 when there is no cover).
+    // The sheets are already in the body (they had to be attached during
+    // pagination so their heights could be measured), so only the footers
+    // are added here.
+    var pageNo = 0;
+    allSheets.forEach(function (sheet) {
+      pageNo++;
+      if (sheet.classList.contains('cover-page') ||
+          sheet.classList.contains('back-page')) {
+        return; // full-bleed page, no footer
       }
+      var footer = doc.createElement('div');
+      footer.className = 'page-footer';
+      footer.textContent = String(pageNo);
+      sheet.appendChild(footer);
     });
 
     return chapterStarts;
@@ -423,6 +476,16 @@
     return frame;
   }
 
+  /* Resolve a configured asset path to an absolute URL. Absolute URLs
+     (http(s):, data:, blob:) pass through untouched; relative paths are
+     resolved against the site root, e.g. "_media/cover.jpg". An empty or
+     falsy value yields '' — pageHtml() then omits the cover/back page. */
+  function resolveAsset(url) {
+    if (!url) return '';
+    if (/^(https?:|data:|blob:)/i.test(url)) return url;
+    return new URL(url, window.location.origin + '/').href;
+  }
+
   async function build() {
     var chapters = await getChapters();
     var chunks = [];
@@ -438,14 +501,24 @@
       chunks.push('<section class="chapter">' + holder.innerHTML + '</section>');
     }
 
-    var coverUrl = new URL('_media/cover.jpg', window.location.origin + '/').href;
+    var coverUrl = resolveAsset(COVER_URL);
+    var backUrl = resolveAsset(BACK_URL);
 
     var frame = getFrame();
     var doc = frame.contentDocument;
     doc.open();
-    doc.write(pageHtml(coverUrl, chapters, chunks.join('\n')));
+    doc.write(pageHtml(coverUrl, backUrl, chapters, chunks.join('\n')));
     doc.close();
     await waitForImages(doc);
+    // Drop the back page if its image failed to load, so the PDF never
+    // contains a broken back cover.
+    var backPage = doc.querySelector('.back-page');
+    if (backPage) {
+      var backImg = backPage.querySelector('img');
+      if (!backImg || !(backImg.complete && backImg.naturalWidth > 0)) {
+        backPage.parentNode.removeChild(backPage);
+      }
+    }
     await new Promise(function (r) { setTimeout(r, 300); }); // let layout settle
     var chapterStarts = paginate(doc, CHAPTER_BREAK);
     fillToc(doc, chapterStarts);
