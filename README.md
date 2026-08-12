@@ -13,6 +13,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **Optional orphan-heading prevention** — `print.keepHeadingsWithNext` moves an `h1`–`h6` to the following page when the content immediately after it cannot fit on the same page.
 - **List and table pagination** — long lists split between top-level items and long tables split between rows instead of leaving most of the preceding page blank. Ordered-list numbering continues correctly.
 - **Optional repeated table headers** — `print.repeatTableHeaders` repeats `<thead>` on table continuation pages when enabled.
+- **Optional heading numbers** — `print.headingNumbers` prepends hierarchical numbers (`1. Introduction`, `2. As-Is`, `2.1 Architecture`, …) to the table-of-contents rows and to the headings themselves.
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
 
 ## Requirements
@@ -69,7 +70,8 @@ window.$docsify = {
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
     chapterBreak: 'page',           // how chapters start in the exported PDF
     keepHeadingsWithNext: true,     // prevent a heading from being orphaned at a page bottom
-    repeatTableHeaders: false       // repeat <thead> on continuation pages (default: false)
+    repeatTableHeaders: false,      // repeat <thead> on continuation pages (default: false)
+    headingNumbers: true            // add hierarchical heading numbers (default: false)
   }
 };
 ```
@@ -150,6 +152,20 @@ print: {
 ```
 
 Default: `false`. The header remains on the table's first page but is not copied to continuation pages.
+
+### `print.headingNumbers`
+
+Set this to `true` to prepend hierarchical numbers to the table-of-contents rows **and** to the headings themselves:
+
+```js
+print: {
+  headingNumbers: true
+}
+```
+
+Chapters are numbered by their sidebar nesting: top-level chapters get `1.`, `2.`, `3.`, … and sidebar entries nested under them get `2.1`, `2.2`, …. Sub-headings inside each chapter's markdown file continue that hierarchy — `##` under chapter 2 becomes `2.1`, a `###` under that becomes `2.1.1`, and so on.
+
+Default: `false` (headings are shown without numbers). The numbers are added only to the exported PDF, never to the on-screen docsify pages.
 
 ### `maxLevel` and `subMaxLevel`
 

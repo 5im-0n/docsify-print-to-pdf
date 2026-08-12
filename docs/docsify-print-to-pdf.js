@@ -32,6 +32,14 @@
  * at the bottom of a page is moved to the next page if the content immediately
  * following it does not fit beside it.
  *
+ * Hierarchical heading numbers — "1. Introduction", "2. As-Is",
+ * "2.1 Architecture", "2.1.1 …" — can be added to the table of contents and
+ * to the headings themselves with window.$docsify.print.headingNumbers
+ * (see index.html). Chapters are numbered by their sidebar nesting
+ * (1, 2, 2.1, 2.2, 3, …); sub-headings continue that hierarchy inside their
+ * chapter (## under chapter 2 → 2.1, ### under that → 2.1.1, …).
+ * Disabled by default.
+ *
  * Long ul/ol lists and tables are split automatically between top-level list
  * items and table rows. Table headers are not repeated by default; set
  * window.$docsify.print.repeatTableHeaders to true to repeat a table's thead
@@ -85,6 +93,11 @@
   // and disabled by default.
   var REPEAT_TABLE_HEADERS = !!(window.$docsify && window.$docsify.print &&
     window.$docsify.print.repeatTableHeaders);
+  // Hierarchical heading numbers ("1. Introduction", "2. As-Is",
+  // "2.1 Architecture", …) added to the TOC rows and to the headings
+  // themselves — optional and disabled by default.
+  var HEADING_NUMBERS = !!(window.$docsify && window.$docsify.print &&
+    window.$docsify.print.headingNumbers);
   // TOC depth — read from the site's docsify settings in index.html:
   //   maxLevel    (default 4) — maximum nesting depth of TOC rows; sidebar
   //                             entries nested deeper are skipped entirely
@@ -155,6 +168,18 @@
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* Prefix a heading element with its hierarchical number ("2." for a chapter
+     h1, "2.1" for an h2, …) — only used when print.headingNumbers is on. The
+     number sits in its own span so it can be styled in the theme color. */
+  function prefixHeadingNumber(h, label) {
+    var doc = h.ownerDocument;
+    var span = doc.createElement('span');
+    span.className = 'heading-number';
+    span.textContent = label;
+    h.insertBefore(span, h.firstChild);
+    h.insertBefore(doc.createTextNode(' '), span.nextSibling);
   }
 
   /* ------------------------------------------------------------ rendering */
@@ -273,6 +298,14 @@
       '.sheet-flow .toc-row .toc-no{flex:0 0 14mm;' +
         'text-align:right;font-weight:600;color:var(--theme-color,#42b983);' +
         'font-variant-numeric:tabular-nums}',
+      /* Hierarchical heading numbers ("1.", "2.1", …) in TOC rows and on the
+         headings themselves — only present when print.headingNumbers is on.
+         The TOC number is a span inside .toc-name, so the whole row (number
+         and title together) still shifts with the row's data-depth indent. */
+      '.sheet-flow .toc-number{font-weight:600;color:var(--theme-color,#42b983);' +
+        'font-variant-numeric:tabular-nums;margin-right:8px}',
+      '.sheet-flow .heading-number{color:var(--theme-color,#42b983);' +
+        'font-variant-numeric:tabular-nums}',
       /* --- chapters --- */
       '.sheet-flow h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
         'border-bottom:2px solid var(--theme-color,#42b983);' +
@@ -326,10 +359,15 @@
     // is one atomic child that cannot be split and would be clipped).
     var items = '';
     chapters.forEach(function (ch, i) {
-      // Chapter row — title and nesting depth from the sidebar.
+      // Chapter row — title and nesting depth from the sidebar. With
+      // print.headingNumbers the hierarchical chapter number ("1.", "2.",
+      // "3.1", …) is prepended to the title.
+      var chNum = ch.numberLabel
+        ? '<span class="toc-number">' + ch.numberLabel + '</span>'
+        : '';
       items += '<div class="toc-row" data-depth="' + ch.depth + '" ' +
         'data-toc-target="ch:' + i + '">' +
-        '<span class="toc-name">' + escapeHtml(ch.title) + '</span>' +
+        '<span class="toc-name">' + chNum + escapeHtml(ch.title) + '</span>' +
         '<span class="toc-leader"></span>' +
         '<span class="toc-no"></span>' +
         '</div>';
@@ -337,9 +375,12 @@
       // build() (h2..h(subMaxLevel+1)), indented under the chapter by their
       // heading level: h2 = one step, h3 = two steps, etc.
       (ch.sections || []).forEach(function (sec) {
+        var secNum = sec.numberLabel
+          ? '<span class="toc-number">' + sec.numberLabel + '</span>'
+          : '';
         items += '<div class="toc-row" data-depth="' + (ch.depth + sec.level - 1) + '" ' +
           'data-toc-target="sec:' + sec.order + '">' +
-          '<span class="toc-name">' + escapeHtml(sec.title) + '</span>' +
+          '<span class="toc-name">' + secNum + escapeHtml(sec.title) + '</span>' +
           '<span class="toc-leader"></span>' +
           '<span class="toc-no"></span>' +
           '</div>';
@@ -931,6 +972,24 @@
 
   async function build() {
     var chapters = await getChapters();
+    // Hierarchical chapter numbers ("1.", "2.", "3.1", …) derived from the
+    // sidebar nesting — only when print.headingNumbers is enabled. One
+    // counter is kept per nesting depth; a deeper chapter resets every
+    // counter below it, so nested sidebar entries number as 2.1, 2.2, …
+    // under their parent.
+    if (HEADING_NUMBERS) {
+      var depthCounters = {};
+      chapters.forEach(function (ch) {
+        depthCounters[ch.depth] = (depthCounters[ch.depth] || 0) + 1;
+        for (var d = ch.depth + 1; d <= MAX_LEVEL; d++) delete depthCounters[d];
+        var parts = [];
+        for (var d2 = 0; d2 <= ch.depth; d2++) parts.push(depthCounters[d2]);
+        ch.number = parts;
+        // Top-level chapters get a trailing dot ("2."), nested ones do not
+        // ("2.1") — same style as the TOC rows in the printed document.
+        ch.numberLabel = parts.join('.') + (ch.depth === 0 ? '.' : '');
+      });
+    }
     var chunks = [];
     // Counter for the data-toc-order attribute stamped on every sub-heading,
     // so fillToc() can find the heading in the paginated document and read
@@ -949,17 +1008,39 @@
       // the sidebar): h2..h(subMaxLevel+1), capped so the total nesting
       // depth never exceeds maxLevel. Each one is stamped with a global
       // data-toc-order so its page number can be found after pagination.
+      // With print.headingNumbers the h1 gets the chapter number and every
+      // h2+ continues it with standard multilevel counters (2.1, 2.1.1,
+      // 2.2, …); numbers are added to all headings, even ones too deep for
+      // the TOC, so the document's heading numbers stay continuous.
       var sections = [];
+      var secCounters = {};
       var headings = holder.querySelectorAll('h1,h2,h3,h4,h5,h6');
       headings.forEach(function (h) {
         var level = parseInt(h.tagName.charAt(1), 10);
+        // Capture the title before the number is prefixed into the heading.
+        var title = h.textContent.trim();
+        var numberLabel = null;
+        if (level === 1) {
+          // Chapter title — the chapter number itself ("2." / "3.1").
+          numberLabel = ch.numberLabel || null;
+        } else {
+          // Advance this level's counter and reset every deeper one, then
+          // assemble "chapter.sub.subsub…" (e.g. chapter 2, second h2 → 2.2).
+          secCounters[level] = (secCounters[level] || 0) + 1;
+          for (var l = level + 1; l <= 6; l++) delete secCounters[l];
+          var parts = (ch.number || []).concat();
+          for (var l2 = 2; l2 <= level; l2++) parts.push(secCounters[l2] || 0);
+          numberLabel = parts.join('.');
+        }
+        if (numberLabel) prefixHeadingNumber(h, numberLabel);
         if (level === 1) return; // chapter title — not a TOC row of its own
         if (level > SUB_MAX_LEVEL + 1) return; // deeper than subMaxLevel
         if (ch.depth + level - 1 >= MAX_LEVEL) return; // deeper than maxLevel
         sections.push({
-          title: h.textContent.trim(),
+          title: title,
           level: level,
-          order: tocOrder
+          order: tocOrder,
+          numberLabel: numberLabel
         });
         h.setAttribute('data-toc-order', String(tocOrder));
         tocOrder++;
