@@ -63,6 +63,13 @@
  * Both are optional: when not set, no cover page and no back page are
  * inserted into the PDF.
  *
+ * A picture can also be painted behind the content of every inner page
+ * (the table of contents and all chapters — like a watermark) via
+ * window.$docsify.print.pageCoverUrl; its transparency is controlled by
+ * window.$docsify.print.pageCoverOpacity, a number between 0 and 1 that
+ * defaults to 0.5. Optional: when not set, the pages stay plain white.
+ * The full-bleed cover and back-cover pages keep their own images.
+ *
  * Why explicit sheets instead of CSS?
  *   - CSS @page margin boxes (@bottom-right { content: counter(page) }) are not
  *     supported by Chrome/Firefox "Save as PDF".
@@ -90,6 +97,20 @@
   // inserted into the PDF.
   var BACK_URL = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.backUrl) || null;
+  // Background picture painted behind the content of every inner page (the
+  // table of contents and all chapters — the full-bleed cover and back-cover
+  // pages keep their own images). Configurable via $docsify.print.pageCoverUrl
+  // in index.html; any relative path or absolute URL works, like coverUrl and
+  // backUrl. Optional: when not set (or set to null/false/''), no background
+  // is painted and the pages stay plain white.
+  var PAGE_COVER_URL = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.pageCoverUrl) || null;
+  // How transparent the page background is — $docsify.print.pageCoverOpacity,
+  // a number between 0 (invisible) and 1 (opaque), clamped to that range.
+  // Default: 0.5, a watermark-like semi-transparent picture.
+  var PAGE_COVER_OPACITY = (window.$docsify && window.$docsify.print &&
+    typeof window.$docsify.print.pageCoverOpacity === 'number')
+    ? Math.min(1, Math.max(0, window.$docsify.print.pageCoverOpacity)) : 0.5;
   // How chapters start in the PDF — window.$docsify.print.chapterBreak:
   //   'page'    (default) — every chapter starts on a new page
   //   'onePage'           — every chapter is scaled to fit on one page
@@ -429,7 +450,7 @@
      section into one-page sheets and adds the numbered footers. The cover
      page is only emitted when coverUrl is set; the back cover page only
      when backUrl is set (it is dropped later if its image fails to load). */
-  function pageHtml(coverUrl, backUrl, chapters, chaptersHtml) {
+  function pageHtml(coverUrl, backUrl, pageCoverUrl, chapters, chaptersHtml) {
     var cover = coverUrl
       ? '<div class="cover-page">' +
         '<img class="cover-img" src="' + coverUrl + '" alt="">' +
@@ -444,11 +465,25 @@
         '<img class="back-img" src="' + backUrl + '" alt="">' +
         '</div>'
       : '';
+    // Optional page background: a picture painted behind the content of every
+    // inner page. It is a .page-sheet::before pseudo-element so the image can
+    // be semi-transparent (pageCoverOpacity) without making the text on top
+    // transparent too, and so a failed image degrades to a plain white page
+    // (no broken-image icon). Because it is absolutely positioned and comes
+    // first in tree order among the sheet's positioned children, it never
+    // affects the scrollHeight measurements during pagination and always sits
+    // behind the .sheet-flow content and the page-number footer.
+    var pageBg = pageCoverUrl
+      ? '.page-sheet::before{content:"";position:absolute;top:0;left:0;' +
+        'width:100%;height:100%;background-image:url("' + pageCoverUrl + '");' +
+        'background-size:cover;background-position:center;' +
+        'background-repeat:no-repeat;opacity:' + PAGE_COVER_OPACITY + '}'
+      : '';
     return [
       '<!DOCTYPE html>',
       '<html><head><meta charset="utf-8">',
       '<title>' + PROJECT + ' — PDF</title>',
-      '<style>' + themeRoot() + styles() + '</style>',
+      '<style>' + themeRoot() + styles() + pageBg + '</style>',
       '</head><body>',
       cover,
       tocHtml(chapters),
@@ -1086,7 +1121,8 @@
   /* Resolve a configured asset path to an absolute URL. Absolute URLs
      (http(s):, data:, blob:) pass through untouched; relative paths are
      resolved against the site root, e.g. "_media/cover.jpg". An empty or
-     falsy value yields '' — pageHtml() then omits the cover/back page. */
+     falsy value yields '' — pageHtml() then omits the cover/back page and
+     the per-page background. */
   function resolveAsset(url) {
     if (!url) return '';
     if (/^(https?:|data:|blob:)/i.test(url)) return url;
@@ -1200,11 +1236,22 @@
 
     var coverUrl = resolveAsset(COVER_URL);
     var backUrl = resolveAsset(BACK_URL);
+    var pageCoverUrl = resolveAsset(PAGE_COVER_URL);
+    if (pageCoverUrl) {
+      // Warm the HTTP cache (and confirm the image exists) before the document
+      // is assembled, so the per-page background is ready when the print dialog
+      // opens. A failed image simply leaves the pages plain white.
+      await new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = img.onerror = resolve;
+        img.src = pageCoverUrl;
+      });
+    }
 
     var frame = getFrame();
     var doc = frame.contentDocument;
     doc.open();
-    doc.write(pageHtml(coverUrl, backUrl, chapters, chunks.join('\n')));
+    doc.write(pageHtml(coverUrl, backUrl, pageCoverUrl, chapters, chunks.join('\n')));
     doc.close();
     await waitForImages(doc);
     // Drop the back page if its image failed to load, so the PDF never

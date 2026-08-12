@@ -28,6 +28,12 @@
         coverUrl: '_media/cover.jpg',
         // Back-cover image — optional. If not set, no back page is inserted.
         backUrl: '_media/back.jpg',
+        // Optional: a picture behind the content of every page (table of
+        // contents and chapters) as a semi-transparent background, like a
+        // watermark. pageCoverOpacity controls its transparency (0..1,
+        // default 0.5). Omit pageCoverUrl for plain white pages.
+        pageCoverUrl: false,
+        pageCoverOpacity: 0.5,
         // How chapters start in the exported PDF:
         //   'page'    (default) — every chapter starts on a new page
         //   'onePage'           — every chapter is scaled to fit on exactly one page
