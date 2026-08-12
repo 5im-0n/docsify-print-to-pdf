@@ -49,6 +49,15 @@
  * window.$docsify.print.repeatTableHeaders to true to repeat a table's thead
  * on each continuation page. Individual list items and rows remain intact.
  *
+ * Page breaks inside a chapter are controlled by the author, not by config:
+ * a "<!-- page-break -->" comment (or an explicit
+ * <div class="print-page-break"></div>) placed on its own line between
+ * blocks forces the following content to start on a new page. The marker is
+ * invisible in the on-screen docs and in the PDF; consecutive markers and a
+ * marker right before the end of the document never produce a blank page.
+ * Markers are ignored in 'onePage' mode (the chapter is scaled onto a single
+ * page) and inside lists/tables/blockquotes (only block-level markers count).
+ *
  * The cover and back-cover images are configurable via
  * window.$docsify.print.coverUrl and window.$docsify.print.backUrl.
  * Both are optional: when not set, no cover page and no back page are
@@ -344,7 +353,12 @@
         'padding:6px 10px;text-align:left}',
       '.sheet-flow th{background:var(--theme-table-th-background,#f8f8f8)}',
       '.sheet-flow img{max-width:100%;border-radius:4px}',
-      '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}'
+      '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}',
+      /* Page-break markers never render — they only signal paginate() to
+         start a fresh sheet for the content that follows them. (This also
+         hides any marker that ends up nested inside a list item or table
+         cell, where a page break does not apply.) */
+      '.print-page-break{display:none}'
     ];
     // One indent step per nesting level (8mm each — half of the original
     // 16mm), so nested rows line up under their parent like in the sidebar
@@ -630,6 +644,61 @@
     group.appendChild(row);
   }
 
+  /* Page-break markers -----------------------------------------------------
+     An author can force a page break inside a chapter with either
+
+       <!-- page-break -->
+
+     or, explicitly,
+
+       <div class="print-page-break"></div>
+
+     placed on its own line between blocks. Both are invisible on the screen
+     (an HTML comment, or an empty div). During pagination a marker never
+     renders; it only schedules the following block to start on a fresh
+     sheet, so a break before the first block, a run of consecutive breaks,
+     or a break at the very end of the document never produces a blank page.
+     Markers are ignored in 'onePage' mode and inside lists/tables/blockquotes
+     (only block-level markers are recognised). */
+
+  function isPageBreak(node) {
+    return !!(node && node.nodeType === 1 &&
+      node.classList && node.classList.contains('print-page-break'));
+  }
+
+  // True when the sheet's flow already holds visible content. Whitespace-only
+  // text nodes (produced by the line breaks in rendered HTML) do not count,
+  // so a page-break marker cannot create a blank page.
+  function flowHasContent(flow) {
+    if (!flow) return false;
+    var nodes = flow.childNodes;
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      if (node.nodeType === 1) return true;
+      if (node.nodeType === 3 && node.nodeValue.trim()) return true;
+    }
+    return false;
+  }
+
+  /* Convert "<!-- page-break -->" comments into marker elements so both
+     spellings end up as the same thing for paginate(). Done on the rendered
+     DOM (not on the markdown source) so the same text inside a fenced code
+     block is never touched. Only block-level comments — direct children of
+     the chapter — are converted; inline comments inside a paragraph are left
+     alone. */
+  function normalizePageBreaks(holder) {
+    var walker = holder.ownerDocument.createTreeWalker(holder, NodeFilter.SHOW_COMMENT);
+    var comments = [];
+    while (walker.nextNode()) comments.push(walker.currentNode);
+    comments.forEach(function (comment) {
+      if (comment.parentNode !== holder) return;
+      if (!/page[\s-]*break/i.test(comment.nodeValue)) return;
+      var marker = holder.ownerDocument.createElement('div');
+      marker.className = 'print-page-break';
+      comment.parentNode.replaceChild(marker, comment);
+    });
+  }
+
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ..., back-page (body children in
      order). Every sheet except the cover and the back cover gets a footer
@@ -652,6 +721,10 @@
      When keepHeadingsWithNext is true, an h1-h6 is moved with the content
      immediately following it if that content overflows the current sheet.
 
+     Page-break markers (see above) set a pendingBreak flag; the next block
+     consumes it by starting on a fresh sheet. In 'flow' mode a marker at the
+     end of a chapter also makes the following chapter start on a fresh page.
+
      Lists and tables are always split between top-level list items/table rows.
      Individual items/rows stay intact; repeatTableHeaders controls whether a
      table's thead is copied to each continuation page. */
@@ -663,6 +736,10 @@
     var allSheets = [];
     var chapterStarts = [];
     var prevWasChapter = false;
+    // Set by a page-break marker; consumed by the next block, which then
+    // starts on a fresh sheet. Kept across sections so a marker at the end of
+    // a chapter still forces the next chapter onto a new page in 'flow' mode.
+    var pendingBreak = false;
     body.textContent = '';
 
     sections.forEach(function (section) {
@@ -682,11 +759,19 @@
 
       var isChapter = section.classList.contains('chapter');
       var chapterOrder = isChapter ? chapterStarts.length : -1;
-      // Keep a marker on the chapter's first element so its actual starting
-      // page can be read after pagination. This matters when orphan prevention
-      // moves the chapter heading from a nearly-full sheet to the next one.
-      if (isChapter && section.firstElementChild) {
-        section.firstElementChild.setAttribute('data-print-chapter-order', String(chapterOrder));
+      // Keep a marker on the chapter's first content element so its actual
+      // starting page can be read after pagination. This matters when orphan
+      // prevention moves the chapter heading from a nearly-full sheet to the
+      // next one. A page-break marker div is skipped: it never lands on a
+      // sheet, so it could not be used to locate the chapter's first page.
+      if (isChapter) {
+        var firstContent = section.firstElementChild;
+        while (firstContent && isPageBreak(firstContent)) {
+          firstContent = firstContent.nextElementSibling;
+        }
+        if (firstContent) {
+          firstContent.setAttribute('data-print-chapter-order', String(chapterOrder));
+        }
       }
       var children = Array.prototype.slice.call(section.childNodes);
       if (!children.length) children = [doc.createTextNode('')];
@@ -699,7 +784,11 @@
         allSheets.push(one);
         body.appendChild(one); // attach so fitToPage() can measure it
         var oneFlow = one.querySelector('.sheet-flow');
-        children.forEach(function (child) { oneFlow.appendChild(child); });
+        // Page-break markers are meaningless in onePage mode (the whole
+        // chapter is scaled to fit a single page), so they are dropped.
+        children.forEach(function (child) {
+          if (!isPageBreak(child)) oneFlow.appendChild(child);
+        });
         fitToPage(oneFlow);
         prevWasChapter = true;
         return;
@@ -707,10 +796,13 @@
 
       // "flow": from the second chapter on, keep filling the previous sheet
       // instead of forcing a page break. The first chapter (and the TOC)
-      // still starts on a fresh page.
+      // still starts on a fresh page. A page-break marker left at the end of
+      // the previous chapter (pendingBreak) overrides the flow: the next
+      // chapter then starts on a fresh sheet as well.
       var current = null;
       var flow = null;
-      var continueFlow = mode === 'flow' && isChapter && prevWasChapter;
+      var continueFlow = mode === 'flow' && isChapter && prevWasChapter &&
+        !pendingBreak;
       if (continueFlow) {
         var last = allSheets[allSheets.length - 1];
         if (last && last.classList.contains('page-sheet')) {
@@ -893,7 +985,20 @@
       }
 
       children.forEach(function (child) {
-        if (!current) startSheet();
+        // A page-break marker never renders: it only schedules a fresh sheet
+        // for the following block. A break before the first block, a run of
+        // consecutive breaks, or a break at the very end of the document
+        // therefore never produces a blank page.
+        if (isPageBreak(child)) {
+          pendingBreak = true;
+          return;
+        }
+        if (!current) {
+          startSheet();
+        } else if (pendingBreak && flowHasContent(flow)) {
+          startSheet();
+        }
+        pendingBreak = false;
         if (isSplittableList(child)) appendList(child);
         else if (isSplittableTable(child)) appendTable(child);
         else appendWholeBlock(child);
@@ -1020,6 +1125,9 @@
       var markdown = await res.text();
       var holder = document.createElement('div');
       holder.innerHTML = renderer().render(markdown);
+      // Convert "<!-- page-break -->" comments to marker elements so both
+      // spellings of a page break work (see normalizePageBreaks).
+      normalizePageBreaks(holder);
       var dir = ch.file.indexOf('/') !== -1 ? ch.file.replace(/[^/]*$/, '') : '';
       absolutize(holder, dir);
       // Sub-headings of this file (the h1 chapter title itself comes from

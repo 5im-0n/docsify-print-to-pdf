@@ -8,6 +8,8 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor i
 
 TODO: Describe how things work today.
 
+<!-- page-break -->
+
 ## Pain points
 
 TODO: List the problems and limitations of the current state.

@@ -12,6 +12,8 @@ TODO: List the project roles and who is responsible for what.
 
 TODO: Describe the communication channels and cadence.
 
+<div class="print-page-break"></div>
+
 ## Reporting
 
 TODO: Describe the reporting structure and frequency.

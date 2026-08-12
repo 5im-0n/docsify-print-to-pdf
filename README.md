@@ -11,6 +11,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **Clickable headings** — every table-of-contents row is a link to its chapter or sub-heading (clicking it in the saved PDF jumps to that section), and every heading inside the chapters is a link back to the table of contents. Headings keep their exact look — no link colors or underlines are added.
 - **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
+- **Page breaks inside chapters** — drop a `<!-- page-break -->` comment (or a `<div class="print-page-break"></div>`) on its own line between blocks to force the following content onto a new page in the PDF. Invisible on screen; consecutive breaks, and breaks at the very start or end of a chapter, never create blank pages (see [Page breaks inside a chapter](#page-breaks-inside-a-chapter)).
 - **Optional orphan-heading prevention** — `print.keepHeadingsWithNext` moves an `h1`–`h6` to the following page when the content immediately after it cannot fit on the same page.
 - **List and table pagination** — long lists split between top-level items and long tables split between rows instead of leaving most of the preceding page blank. Ordered-list numbering continues correctly.
 - **Optional repeated table headers** — `print.repeatTableHeaders` repeats `<thead>` on table continuation pages when enabled.
@@ -183,10 +184,34 @@ window.$docsify = {
 - `maxLevel` (default `4`) — the maximum nesting depth of TOC rows. Sidebar entries nested deeper are skipped entirely, and sub-headings are capped so their total depth never exceeds it.
 - `subMaxLevel` (default `2`) — how many heading levels below the chapter title are listed from each markdown file: `2` lists `##` and `###`, `1` only `##`, `0` disables sub-headings (chapters only, as before).
 
+## Page breaks inside a chapter
+
+`print.chapterBreak` controls how whole chapters start. To also force a page break *inside* a chapter — e.g. to make a section start at the top of a new page — put one of these markers on its own line, between two blocks:
+
+```markdown
+<!-- page-break -->
+```
+
+or, equivalently:
+
+```html
+<div class="print-page-break"></div>
+```
+
+Both spellings do exactly the same thing: in the exported PDF, everything that follows the marker starts on a new page. The marker itself is invisible — both in the normal on-screen documentation and in the PDF.
+
+Notes:
+
+- The marker must be **block-level**: on its own line between blocks, not inside a paragraph, list item, table cell or blockquote. Markers nested inside such blocks are ignored.
+- A page break **never creates a blank page**: consecutive markers count as one break, a marker at the very start of a chapter is a no-op, and a marker at the very end of the document is simply ignored.
+- In `chapterBreak: 'flow'` mode, a marker at the end of a chapter also makes the *next* chapter start on a fresh page (the only way to break between chapters in flow mode).
+- In `chapterBreak: 'onePage'` mode markers are ignored, because the whole chapter is scaled to fit on a single page.
+- Text that looks like a marker inside a fenced code block is left untouched.
+
 ## How it works
 
 1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth, capped by `maxLevel`).
-2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document) and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
+2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document), converts `<!-- page-break -->` markers into forced page breaks, and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
 3. Assembles a document: (optional) full-bleed cover (`print.coverUrl`) → table of contents → all chapters → (optional) full-bleed back cover (`print.backUrl`). If `coverUrl` or `backUrl` is not set, the corresponding page is left out and the page numbers adjust accordingly.
 4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every page except the cover and the back cover (so without a cover, the TOC is page 1).
 5. Renders the result in a hidden same-origin iframe and triggers `print()`, so the user can save it as a PDF.
