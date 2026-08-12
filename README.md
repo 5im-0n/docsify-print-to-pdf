@@ -47,13 +47,13 @@ A green **Print to PDF** button appears in the bottom-right corner of every page
 
 ### 3. Via jsDelivr (CDN)
 
-The file is also available on jsDelivr, so no local copy is needed — just include it in a script tag:
+The file is published to npm, so no local copy is needed — just include it in a script tag:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/5im-0n/docsify-print-to-pdf/docs/print.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docsify-print-to-pdf@1/docs/docsify-print-to-pdf.js"></script>
 ```
 
-> **Note:** the CDN URL points to `docs/print.js`, which is the published name of this file on the `main` branch of the repository. If you reference the file by its repository path instead, use `docs/docsify-print-to-pdf.js`.
+> The `@1` pins the latest 1.x release; drop it to always get the newest version. The same file is available on unpkg: `https://unpkg.com/docsify-print-to-pdf/docs/docsify-print-to-pdf.js`.
 
 ## Configuration
 

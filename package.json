@@ -1,15 +1,38 @@
 {
   "name": "docsify-print-to-pdf",
   "version": "1.0.0",
-  "description": "",
+  "description": "A \"Print to PDF\" button for Docsify that assembles the whole documentation (cover, table of contents and all chapters) into a single paginated A4 document and opens the browser's print dialog.",
   "license": "ISC",
-  "author": "",
+  "author": "s2 <s2@31337.it>",
   "type": "commonjs",
-  "main": "index.js",
-  "scripts": {
-    "docs": "docsify serve docs -H 127.0.0.1 -o"
+  "main": "docs/docsify-print-to-pdf.js",
+  "browser": "docs/docsify-print-to-pdf.js",
+  "unpkg": "docs/docsify-print-to-pdf.js",
+  "jsdelivr": "docs/docsify-print-to-pdf.js",
+  "files": [
+    "docs/docsify-print-to-pdf.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "docsify",
+    "docsify-plugin",
+    "pdf",
+    "print",
+    "print-to-pdf",
+    "documentation",
+    "save-as-pdf"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/5im-0n/docsify-print-to-pdf.git"
   },
-  "dependencies": {
+  "homepage": "https://github.com/5im-0n/docsify-print-to-pdf#readme",
+  "scripts": {
+    "docs": "docsify serve docs -H 127.0.0.1 -o",
+    "prepublishOnly": "npm pack --dry-run"
+  },
+  "devDependencies": {
     "docsify-cli": "^5.0.0"
   }
 }
