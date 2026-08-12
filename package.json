@@ -1,6 +1,6 @@
 {
   "name": "docsify-print-to-pdf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A \"Print to PDF\" button for Docsify that assembles the whole documentation (cover, table of contents and all chapters) into a single paginated A4 document and opens the browser's print dialog.",
   "license": "ISC",
   "author": "s2 <s2@31337.it>",
