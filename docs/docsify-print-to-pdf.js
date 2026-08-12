@@ -14,7 +14,11 @@
  *      row (nested chapters are indented under their parent, like in the
  *      sidebar) plus the sub-headings (h2/h3/...) of each chapter's markdown
  *      file, indented under their chapter — the depth follows the site's
- *      maxLevel / subMaxLevel settings in index.html
+ *      maxLevel / subMaxLevel settings in index.html. Every TOC row is a
+ *      link to its section and every heading in the chapters is a link back
+ *      to the table of contents — internal links that stay clickable in the
+ *      saved PDF, styled to look exactly like the plain headings (no link
+ *      colors or underlines).
  *   4. opens it in a hidden same-origin iframe and calls the browser's print
  *      dialog so the user can "Save as PDF".
  *
@@ -285,11 +289,13 @@
          (rules generated below): chapters by their sidebar depth, sub-heading
          rows by chapter depth + heading level - 1 (the whole row shifts —
          number and title together).
-         Rows are plain divs (no <ul> wrapper) on purpose: paginate() slices a
-         section's children across sheets, so each row must be its own child
-         for a long TOC to span several pages instead of being clipped. */
+         Rows are plain <a> elements (no <ul> wrapper) on purpose: paginate()
+         slices a section's children across sheets, so each row must be its
+         own child for a long TOC to span several pages instead of being
+         clipped. */
       '.sheet-flow .toc-row{display:flex;align-items:baseline;gap:12px;' +
-        'padding:6px 0;font-size:13pt;color:var(--theme-heading-color,#2c3e50)}',
+        'padding:6px 0;font-size:13pt;color:var(--theme-heading-color,#2c3e50);' +
+        'text-decoration:none}',
       /* The leader is the subtle dotted line between the title and the page
          number; it stretches (flex:1) to fill the space and its bottom edge
          (an empty flex item's baseline) sits right on the text baseline. */
@@ -314,6 +320,10 @@
         'color:var(--theme-heading-color,#2c3e50)}',
       '.sheet-flow h3{font-size:13pt;margin:18px 0 6px;' +
         'color:var(--theme-heading-color,#2c3e50)}',
+      /* Headings are wrapped in a link back to the table of contents; keep
+         the link invisible so headings look exactly as before. */
+      '.sheet-flow h1 a,.sheet-flow h2 a,.sheet-flow h3 a,' +
+        '.sheet-flow h4 a,.sheet-flow h5 a,.sheet-flow h6 a{color:inherit;text-decoration:none}',
       '.sheet-flow p{margin:0 0 10px}',
       '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;' +
         'border-left:4px solid var(--theme-blockquote-border,var(--theme-color,#42b983));' +
@@ -354,9 +364,13 @@
     // uses to look up its page number: "ch:<i>" for chapters (by sidebar
     // index), "sec:<order>" for sub-headings (the data-toc-order stamped on
     // the heading element in build()).
-    // Rows are emitted as plain divs without a <ul> wrapper so paginate()
-    // can split a long TOC across several sheets row by row (a single <ul>
-    // is one atomic child that cannot be split and would be clipped).
+    // Every row is an <a> linking to its heading's id — "ch-<i>" for a
+    // chapter, "sec-<order>" for a sub-heading — so the rows stay clickable
+    // in the saved PDF; styles() keeps them looking like plain text.
+    // Rows are emitted as individual <a> elements without a <ul> wrapper so
+    // paginate() can split a long TOC across several sheets row by row (a
+    // single <ul> is one atomic child that cannot be split and would be
+    // clipped).
     var items = '';
     chapters.forEach(function (ch, i) {
       // Chapter row — title and nesting depth from the sidebar. With
@@ -365,12 +379,13 @@
       var chNum = ch.numberLabel
         ? '<span class="toc-number">' + ch.numberLabel + '</span>'
         : '';
-      items += '<div class="toc-row" data-depth="' + ch.depth + '" ' +
-        'data-toc-target="ch:' + i + '">' +
+      items += '<a class="toc-row" data-depth="' + ch.depth + '" ' +
+        'data-toc-target="ch:' + i + '"' +
+        (ch.headingId ? ' href="#' + ch.headingId + '"' : '') + '>' +
         '<span class="toc-name">' + chNum + escapeHtml(ch.title) + '</span>' +
         '<span class="toc-leader"></span>' +
         '<span class="toc-no"></span>' +
-        '</div>';
+        '</a>';
       // Sub-heading rows — collected from the chapter's markdown file in
       // build() (h2..h(subMaxLevel+1)), indented under the chapter by their
       // heading level: h2 = one step, h3 = two steps, etc.
@@ -378,16 +393,19 @@
         var secNum = sec.numberLabel
           ? '<span class="toc-number">' + sec.numberLabel + '</span>'
           : '';
-        items += '<div class="toc-row" data-depth="' + (ch.depth + sec.level - 1) + '" ' +
-          'data-toc-target="sec:' + sec.order + '">' +
+        items += '<a class="toc-row" data-depth="' + (ch.depth + sec.level - 1) + '" ' +
+          'data-toc-target="sec:' + sec.order + '" href="#sec-' + sec.order + '">' +
           '<span class="toc-name">' + secNum + escapeHtml(sec.title) + '</span>' +
           '<span class="toc-leader"></span>' +
           '<span class="toc-no"></span>' +
-          '</div>';
+          '</a>';
       });
     });
+    // The TOC title carries id="toc": it is the target of the "back to
+    // contents" links wrapped around every chapter heading (added in
+    // build()), so clicking any heading lands on the TOC page.
     return '<section class="toc-page">' +
-      '<h1 class="toc-title">' + escapeHtml(TOC_TITLE) + '</h1>' +
+      '<h1 class="toc-title" id="toc">' + escapeHtml(TOC_TITLE) + '</h1>' +
       items +
       '</section>';
   }
@@ -1014,6 +1032,10 @@
       // the TOC, so the document's heading numbers stay continuous.
       var sections = [];
       var secCounters = {};
+      // Id of the chapter's first h1 ("ch-<i>"), when the file has one — the
+      // chapter's TOC row links to it. Left null when the file has no h1 so
+      // that row is emitted without an href instead of a dead link.
+      var chapterTitleId = null;
       var headings = holder.querySelectorAll('h1,h2,h3,h4,h5,h6');
       headings.forEach(function (h) {
         var level = parseInt(h.tagName.charAt(1), 10);
@@ -1023,6 +1045,10 @@
         if (level === 1) {
           // Chapter title — the chapter number itself ("2." / "3.1").
           numberLabel = ch.numberLabel || null;
+          if (!chapterTitleId) {
+            h.setAttribute('id', 'ch-' + i);
+            chapterTitleId = 'ch-' + i;
+          }
         } else {
           // Advance this level's counter and reset every deeper one, then
           // assemble "chapter.sub.subsub…" (e.g. chapter 2, second h2 → 2.2).
@@ -1033,6 +1059,17 @@
           numberLabel = parts.join('.');
         }
         if (numberLabel) prefixHeadingNumber(h, numberLabel);
+        // Make the heading clickable: wrap its content in a link back to the
+        // table of contents. styles() keeps the link invisible, so headings
+        // look exactly as before. Wrapping after prefixHeadingNumber also
+        // puts the number inside the link. Headings that already contain a
+        // link are left alone (an <a> cannot contain another <a>).
+        if (!h.querySelector('a')) {
+          var backLink = document.createElement('a');
+          backLink.href = '#toc';
+          while (h.firstChild) backLink.appendChild(h.firstChild);
+          h.appendChild(backLink);
+        }
         if (level === 1) return; // chapter title — not a TOC row of its own
         if (level > SUB_MAX_LEVEL + 1) return; // deeper than subMaxLevel
         if (ch.depth + level - 1 >= MAX_LEVEL) return; // deeper than maxLevel
@@ -1042,10 +1079,14 @@
           order: tocOrder,
           numberLabel: numberLabel
         });
+        // The TOC row links to this heading by its id ("sec-<order>"), so the
+        // id mirrors the data-toc-order value stamped on the element.
         h.setAttribute('data-toc-order', String(tocOrder));
+        h.setAttribute('id', 'sec-' + tocOrder);
         tocOrder++;
       });
       ch.sections = sections;
+      ch.headingId = chapterTitleId;
       chunks.push('<section class="chapter">' + holder.innerHTML + '</section>');
     }
 
