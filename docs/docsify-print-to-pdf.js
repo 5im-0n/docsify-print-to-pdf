@@ -175,9 +175,35 @@
     return link + '.md';
   }
 
+  function sidebarPathForCurrentRoute() {
+    // Docsify's default hash route looks like #/en/chapters/example.
+    // In history mode, use the pathname instead.
+    var route = (window.location.hash || '')
+      .replace(/^#/, '')
+      .split(/[?#]/)[0];
+
+    if (!route || route.charAt(0) !== '/') {
+      route = window.location.pathname || '/';
+    }
+
+    var match = route.match(/^\/([^/]+)(?:\/|$)/);
+    if (!match || match[1] === 'index.html') return '_sidebar.md';
+
+    return match[1] + '/_sidebar.md';
+  }
+
   async function getChapters() {
-    var res = await fetch('_sidebar.md', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('Could not load _sidebar.md');
+    var sidebarPath = sidebarPathForCurrentRoute();
+    var res = await fetch(sidebarPath, { cache: 'no-cache' });
+
+    // Keep the existing single-sidebar behavior when the route has no
+    // corresponding sidebar of its own.
+    if (!res.ok && sidebarPath !== '_sidebar.md') {
+      sidebarPath = '_sidebar.md';
+      res = await fetch(sidebarPath, { cache: 'no-cache' });
+    }
+    if (!res.ok) throw new Error('Could not load ' + sidebarPath);
+
     var text = await res.text();
     var chapters = [];
     // Capture the leading whitespace so nested sidebar entries (indented with
@@ -195,7 +221,7 @@
     // Respect the site's maxLevel: entries nested deeper than that are not
     // listed in the TOC (and their files are not rendered at all).
     chapters = chapters.filter(function (c) { return c.depth < MAX_LEVEL; });
-    if (!chapters.length) throw new Error('No chapters found in _sidebar.md');
+    if (!chapters.length) throw new Error('No chapters found in ' + sidebarPath);
     return chapters;
   }
 
