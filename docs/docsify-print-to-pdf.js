@@ -9,7 +9,7 @@
  *      neither is inserted — then paginates it into explicit 210x297mm
  *      "sheets" (one sheet = one printed page) and puts a real, absolutely
  *      positioned footer with the page number at the bottom-right of every
- *      page except the cover and the back cover; the TOC lists every chapter
+ *      page except full-bleed image pages; the TOC lists every chapter
  *      as a uniform row with its starting page number on the right of each
  *      row (nested chapters are indented under their parent, like in the
  *      sidebar) plus the sub-headings (h2/h3/...) of each chapter's markdown
@@ -26,8 +26,8 @@
  * (see index.html):
  *   'page'    (default) — every chapter starts on a new page and may span
  *                         several pages
- *   'onePage'           — every chapter is scaled down to fit on exactly one
- *                         page (slide-deck style)
+ *   'onePage'           — every chapter content segment is scaled down to fit
+ *                         one page (full-page images separate the segments)
  *   'flow'              — no page break: chapters flow continuously, content
  *                         simply continues on the same page
  *
@@ -57,6 +57,14 @@
  * marker right before the end of the document never produce a blank page.
  * Markers are ignored in 'onePage' mode (the chapter is scaled onto a single
  * page) and inside lists/tables/blockquotes (only block-level markers count).
+ *
+ * Full-page images can be placed anywhere in a chapter with a standalone
+ * "<!-- full-page-image -->" comment immediately before a standalone image.
+ * The image gets one full-bleed A4 page without a footer or page watermark;
+ * surrounding content always starts on separate pages, in every chapter mode.
+ * The default fit is 'contain' (no cropping); use
+ * "<!-- full-page-image fit=cover -->" to fill the page with cropping instead.
+ * In 'onePage' mode, each content segment around an image is scaled separately.
  *
  * The cover and back-cover images are configurable via
  * window.$docsify.print.coverUrl and window.$docsify.print.backUrl.
@@ -325,6 +333,13 @@
          guarantees the back cover still starts on its own fresh page. */
       '.back-page{position:relative;width:210mm;height:297mm;overflow:hidden;background:#fff}',
       '.back-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
+      /* --- reusable full-page images (no margins, watermark or footer) --- */
+      '.full-page-image{position:relative;width:210mm;height:297mm;padding:0;' +
+        'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
+      '.full-page-image img{display:block;position:absolute;inset:0;width:100%;height:100%;' +
+        'max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;' +
+        'object-fit:contain;object-position:center;opacity:1}',
+      '.full-page-image[data-fit="cover"] img{object-fit:cover}',
       /* --- inner pages (table of contents + chapters) --- */
       '.page-sheet{position:relative;width:210mm;height:297mm;padding:20mm 18mm;' +
         'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
@@ -764,10 +779,57 @@
     });
   }
 
+  /* A full-page-image marker applies only to the immediately following
+     standalone image block. Parse the rendered DOM, not markdown, so examples
+     in code fences and nested/inline comments are never interpreted. Invalid
+     markers warn and leave all content in its normal layout. */
+  function normalizeFullPageImages(holder) {
+    var walker = holder.ownerDocument.createTreeWalker(holder, NodeFilter.SHOW_COMMENT);
+    var comments = [];
+    while (walker.nextNode()) comments.push(walker.currentNode);
+    comments.forEach(function (comment) {
+      if (comment.parentNode !== holder) return;
+      var value = comment.nodeValue.trim();
+      if (!/^full-page-image\b/i.test(value)) return;
+      var match = /^full-page-image(?:\s+fit=(contain|cover))?$/i.exec(value);
+      var block = comment.nextSibling;
+      while (block && (block.nodeType === 8 ||
+          (block.nodeType === 3 && !block.nodeValue.trim()))) {
+        block = block.nextSibling;
+      }
+      var image = block && block.nodeType === 1 && block.tagName === 'IMG' ? block : null;
+      if (block && block.nodeType === 1 && block.tagName === 'P') {
+        var content = Array.prototype.filter.call(block.childNodes, function (node) {
+          return node.nodeType !== 8 && !(node.nodeType === 3 && !node.nodeValue.trim());
+        });
+        if (content.length === 1 && content[0].nodeType === 1 && content[0].tagName === 'IMG') {
+          image = content[0];
+        }
+      }
+      if (!match || !image) {
+        console.warn('[docsify-print-to-pdf] Invalid full-page-image marker: use ' +
+          '<!-- full-page-image [fit=contain|cover] --> before a standalone image. ' +
+          'Content was left unchanged.');
+        return;
+      }
+      var page = holder.ownerDocument.createElement('div');
+      page.className = 'full-page-image';
+      page.setAttribute('data-fit', (match[1] || 'contain').toLowerCase());
+      holder.replaceChild(page, block);
+      page.appendChild(image);
+      holder.removeChild(comment);
+    });
+  }
+
+  function isFullPageImage(node) {
+    return !!(node && node.nodeType === 1 &&
+      node.classList && node.classList.contains('full-page-image'));
+  }
+
   /* Slices the phase-1 sections into one-page sheets. Sections are:
      cover-page, toc-page, chapter, chapter, ..., back-page (body children in
-     order). Every sheet except the cover and the back cover gets a footer
-     with its real page number.
+     order). Full-page images within chapters become sheets of their own.
+     Every sheet except full-bleed image pages gets a numbered footer.
      Returns the starting page number of each chapter section (in order) so
      the caller can fill the numbers into the table of contents.
 
@@ -780,7 +842,7 @@
      The page-break behaviour between chapters is controlled by `mode`
      (window.$docsify.print.chapterBreak):
        'page'    — each chapter starts on a fresh page (default)
-       'onePage' — each chapter is scaled down to fit on exactly one page
+       'onePage' — each chapter content segment is scaled onto one page
        'flow'    — no page break: chapters flow continuously
 
      When keepHeadingsWithNext is true, an h1-h6 is moved with the content
@@ -824,13 +886,12 @@
 
       var isChapter = section.classList.contains('chapter');
       var chapterOrder = isChapter ? chapterStarts.length : -1;
-      // Keep a marker on the chapter's first content element so its actual
-      // starting page can be read after pagination. This matters when orphan
-      // prevention moves the chapter heading from a nearly-full sheet to the
-      // next one. A page-break marker div is skipped: it never lands on a
-      // sheet, so it could not be used to locate the chapter's first page.
+      // Locate the chapter by its h1, when present, so a leading image page
+      // or project metadata does not make the TOC number disagree with its
+      // heading link. Otherwise fall back to the first content element.
+      // Page-break markers are skipped because they never land on a sheet.
       if (isChapter) {
-        var firstContent = section.firstElementChild;
+        var firstContent = section.querySelector('h1') || section.firstElementChild;
         while (firstContent && isPageBreak(firstContent)) {
           firstContent = firstContent.nextElementSibling;
         }
@@ -841,20 +902,32 @@
       var children = Array.prototype.slice.call(section.childNodes);
       if (!children.length) children = [doc.createTextNode('')];
 
-      // "onePage": put the whole chapter in a single sheet and scale it down
-      // if it doesn't fit, so the chapter never spills onto a second page.
+      // "onePage": scale each content segment onto one sheet. Full-page
+      // images remain separate unscaled sheets, even in this mode. Ordinary
+      // page-break markers are still ignored, as they were before.
       if (isChapter && mode === 'onePage') {
         chapterStarts.push(allSheets.length + 1);
-        var one = newSheet(doc);
-        allSheets.push(one);
-        body.appendChild(one); // attach so fitToPage() can measure it
-        var oneFlow = one.querySelector('.sheet-flow');
-        // Page-break markers are meaningless in onePage mode (the whole
-        // chapter is scaled to fit a single page), so they are dropped.
+        var oneFlow = null;
         children.forEach(function (child) {
-          if (!isPageBreak(child)) oneFlow.appendChild(child);
+          if (isPageBreak(child) || child.nodeType === 8 ||
+              (child.nodeType === 3 && !child.nodeValue.trim())) return;
+          if (isFullPageImage(child)) {
+            if (oneFlow) fitToPage(oneFlow);
+            oneFlow = null;
+            allSheets.push(child);
+            body.appendChild(child);
+            return;
+          }
+          if (!oneFlow) {
+            var one = newSheet(doc);
+            allSheets.push(one);
+            body.appendChild(one); // attach so fitToPage() can measure it
+            oneFlow = one.querySelector('.sheet-flow');
+          }
+          oneFlow.appendChild(child);
         });
-        fitToPage(oneFlow);
+        if (oneFlow) fitToPage(oneFlow);
+        pendingBreak = false;
         prevWasChapter = true;
         return;
       }
@@ -1050,6 +1123,18 @@
       }
 
       children.forEach(function (child) {
+        // Formatting whitespace and comments must not create empty sheets
+        // before or after a full-page image (or a trailing page break).
+        if (child.nodeType === 8 ||
+            (child.nodeType === 3 && !child.nodeValue.trim())) return;
+        if (isFullPageImage(child)) {
+          allSheets.push(child);
+          body.appendChild(child);
+          current = null;
+          flow = null;
+          pendingBreak = false;
+          return;
+        }
         // A page-break marker never renders: it only schedules a fresh sheet
         // for the following block. A break before the first block, a run of
         // consecutive breaks, or a break at the very end of the document
@@ -1076,15 +1161,15 @@
     // following content. Recalculate chapter starts from the markers so the
     // table of contents always points to the heading's actual page.
     doc.querySelectorAll('[data-print-chapter-order]').forEach(function (marker) {
-      var sheet = marker.closest('.page-sheet');
+      var sheet = marker.closest('.page-sheet, .full-page-image');
       var order = parseInt(marker.getAttribute('data-print-chapter-order'), 10);
       var index = allSheets.indexOf(sheet);
       if (!isNaN(order) && index !== -1) chapterStarts[order] = index + 1;
     });
 
-    // Number every sheet that is not a full-bleed cover or back-cover page.
-    // The page counter counts every sheet (so with a cover, the TOC is
-    // page 2), but footers are only placed on non-cover/non-back sheets.
+    // Count every sheet (including covers and full-page images), but only
+    // place footers on normal content/TOC sheets. With a cover, the TOC is
+    // page 2; all subsequent numbers include the full-page images too.
     // Previously the first sheet was skipped via "idx > 0" because the cover
     // was always present; now that the cover is optional, skip by class so
     // the numbering stays correct (TOC = page 1 when there is no cover).
@@ -1095,7 +1180,7 @@
     allSheets.forEach(function (sheet) {
       pageNo++;
       if (sheet.classList.contains('cover-page') ||
-          sheet.classList.contains('back-page')) {
+          sheet.classList.contains('back-page') || isFullPageImage(sheet)) {
         return; // full-bleed page, no footer
       }
       var footer = doc.createElement('div');
@@ -1194,6 +1279,7 @@
       // Convert "<!-- page-break -->" comments to marker elements so both
       // spellings of a page break work (see normalizePageBreaks).
       normalizePageBreaks(holder);
+      normalizeFullPageImages(holder);
       var dir = ch.file.indexOf('/') !== -1 ? ch.file.replace(/[^/]*$/, '') : '';
       absolutize(holder, dir);
       // Sub-headings of this file (the h1 chapter title itself comes from

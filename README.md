@@ -10,7 +10,8 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **Optional per-page background** — if you set `print.pageCoverUrl`, that picture is painted semi-transparently behind the content of every page (table of contents and chapters), like a watermark; `print.pageCoverOpacity` (default `0.5`) controls its transparency. When not set, the pages stay plain white.
 - **Table of contents** — lists every chapter (from the sidebar) with its starting page number on the right, plus the sub-headings (`##`, `###`, …) of each chapter's markdown file with their page numbers; rows are indented under their parent exactly like the sidebar, and the depth follows the site's `maxLevel` / `subMaxLevel` settings (see [Configuration](#configuration)).
 - **Clickable headings** — every table-of-contents row is a link to its chapter or sub-heading (clicking it in the saved PDF jumps to that section), and every heading inside the chapters is a link back to the table of contents. Headings keep their exact look — no link colors or underlines are added.
-- **Real page numbers** — every page except the (optional) cover and back cover gets an actual footer with its page number (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
+- **Real page numbers** — every normal content and TOC page gets an actual footer with its page number; full-bleed covers and image pages count in the sequence but have no footer (works in Chrome and Firefox "Save as PDF", where CSS `@page` margin boxes are not supported).
+- **Reusable full-page images** — put `<!-- full-page-image -->` before a standalone Markdown image to give it one edge-to-edge A4 page anywhere in the document, without margins, watermark, or footer. Use `fit=cover` for cropping instead of the default `contain` fit (see [Full-page images](#full-page-images)).
 - **Configurable chapter breaks** — chapters can start on a new page, be scaled to one page, or flow continuously (see [Configuration](#configuration)).
 - **Page breaks inside chapters** — drop a `<!-- page-break -->` comment (or a `<div class="print-page-break"></div>`) on its own line between blocks to force the following content onto a new page in the PDF. Invisible on screen; consecutive breaks, and breaks at the very start or end of a chapter, never create blank pages (see [Page breaks inside a chapter](#page-breaks-inside-a-chapter)).
 - **Optional orphan-heading prevention** — `print.keepHeadingsWithNext` moves an `h1`–`h6` to the following page when the content immediately after it cannot fit on the same page.
@@ -158,7 +159,7 @@ How chapters start in the exported PDF:
 | Value      | Behaviour                                                                 |
 | ---------- | ------------------------------------------------------------------------- |
 | `'page'`   | **(default)** every chapter starts on a new page and may span several pages |
-| `'onePage'`| every chapter is scaled down to fit on exactly one page (slide-deck style) |
+| `'onePage'`| every chapter is scaled onto one page; full-page images split it into separately scaled content segments |
 | `'flow'`   | no page break — chapters flow continuously, content continues on the same page |
 
 ### `print.keepHeadingsWithNext`
@@ -172,7 +173,7 @@ print: {
 }
 ```
 
-Default: `false` (existing pagination behaviour is preserved unless this option is enabled). The option does not change the `'onePage'` mode, because that mode scales the complete chapter onto one sheet.
+Default: `false` (existing pagination behaviour is preserved unless this option is enabled). The option does not change the `'onePage'` mode, because that mode scales each chapter content segment onto one sheet.
 
 ### List and table pagination
 
@@ -249,12 +250,52 @@ Notes:
 - In `chapterBreak: 'onePage'` mode markers are ignored, because the whole chapter is scaled to fit on a single page.
 - Text that looks like a marker inside a fenced code block is left untouched.
 
+## Full-page images
+
+Insert a reusable edge-to-edge image page anywhere in a chapter by putting a standalone marker immediately before a standalone image:
+
+```markdown
+<!-- full-page-image -->
+
+![Organization flyer](_media/flyer.png)
+
+Content on the following page.
+```
+
+The image occupies exactly one A4 page, with no document margins, page-number footer, or per-page watermark. Its opacity is independent of the cover image. Content before and after it is placed on separate pages automatically; no additional `<!-- page-break -->` is needed. A leading image in the first chapter appears after the entire table of contents.
+
+Image pages count in the PDF page sequence and subsequent TOC/footer numbers, but do not get their own TOC entry or chapter number. Chapter TOC entries point to the chapter's first `h1` when present, so a leading flyer does not make the page number disagree with the heading link. Files without an `h1` use their first content page.
+
+### Fitting and appearance
+
+The default is `contain`: the entire image is visible without cropping. Use A4-proportioned artwork (210:297) to fill the page without unused space. Other proportions leave space around the image, with a white background by default.
+
+To fill the page completely and crop excess at the edges:
+
+```markdown
+<!-- full-page-image fit=cover -->
+
+![Full-page photograph](_media/photo.jpg)
+```
+
+`<!-- full-page-image fit=contain -->` explicitly selects the default. The plugin provides the basic A4 layout; themes can customize `.full-page-image` and `.full-page-image img`, independently of `.cover-page` and `.sheet-flow img`.
+
+### Notes
+
+- Works in `page`, `flow`, and `onePage` chapter modes. In `onePage` mode, each content segment around an image is scaled onto its own page; image pages are never scaled with chapter text.
+- Put the marker and image at the chapter's top level, separated from other content by blank lines. The following block must be an image-only paragraph (standard Markdown) or a standalone `<img>`. Inline images with other text, linked images, lists, tables, blockquotes, and code-fence examples are not interpreted as full-page image directives.
+- Invalid directives warn in the browser console and leave all content in normal layout.
+- Consecutive image pages, and image pages at the start or end of a chapter, do not introduce blank content pages.
+- On the Docsify website, the comment stays invisible and the image displays normally.
+- Text baked into the image is not selectable/searchable as normal PDF text.
+- Disable browser print headers and footers. Saving as PDF supports zero-margin output; actual edge-to-edge paper printing requires a borderless-capable printer.
+
 ## How it works
 
 1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth, capped by `maxLevel`).
-2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document), converts `<!-- page-break -->` markers into forced page breaks, and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
+2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document), converts `<!-- page-break -->` markers into forced page breaks and `<!-- full-page-image -->` directives into dedicated image pages, and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
 3. Assembles a document: (optional) full-bleed cover (`print.coverUrl`) → table of contents → all chapters → (optional) full-bleed back cover (`print.backUrl`). If `coverUrl` or `backUrl` is not set, the corresponding page is left out and the page numbers adjust accordingly. With `print.pageCoverUrl`, that picture is also painted semi-transparently behind the content of every inner page (`print.pageCoverOpacity`, default `0.5`).
-4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every page except the cover and the back cover (so without a cover, the TOC is page 1).
+4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every normal content/TOC page, excluding covers and full-page images (so without a cover, the TOC is page 1).
 5. Renders the result in a hidden same-origin iframe and triggers `print()`, so the user can save it as a PDF.
 
 Explicit sheets are used because CSS `@page` margin boxes (`@bottom-right { content: counter(page) }`) are not supported by Chrome/Firefox "Save as PDF", and a `position: fixed` footer is printed only once by Chromium. Making each page a real element guarantees the page number appears on every page.
