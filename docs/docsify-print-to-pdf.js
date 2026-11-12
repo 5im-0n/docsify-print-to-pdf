@@ -87,6 +87,10 @@
   // in index.html (fallback: "Table of Contents").
   var TOC_TITLE = (window.$docsify && window.$docsify.print &&
     window.$docsify.print.tocTitle) || 'Table of Contents';
+  // Cover subtitle — configurable via $docsify.print.coverSubtitle in
+  // index.html (fallback: "Project documentation").
+  var COVER_SUBTITLE = (window.$docsify && window.$docsify.print &&
+    window.$docsify.print.coverSubtitle) || 'Project documentation';
   // Cover image — configurable via $docsify.print.coverUrl in index.html.
   // Optional: when not set (or set to null/false/''), no cover page is
   // inserted into the PDF.
@@ -482,7 +486,7 @@
         '<img class="cover-img" src="' + coverUrl + '" alt="">' +
         '<div class="cover-content">' +
         '<div class="cover-title">' + PROJECT + '</div>' +
-        '<div class="cover-subtitle">Project documentation</div>' +
+        '<div class="cover-subtitle">' + escapeHtml(COVER_SUBTITLE) + '</div>' +
         '</div>' +
         '</div>'
       : '';

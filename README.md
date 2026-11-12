@@ -69,6 +69,7 @@ window.$docsify = {
   loadSidebar: true,
   print: {
     tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
+    coverSubtitle: 'Project documentation',  // subtitle on the PDF cover page
     coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
     pageCoverUrl: '_media/watermark.jpg', // optional — background picture on every page
@@ -86,6 +87,16 @@ Both `coverUrl` and `backUrl` are **optional**: when either is not set, the corr
 ### `print.tocTitle`
 
 The heading of the table of contents page. Default: `'Table of Contents'`.
+
+### `print.coverSubtitle`
+
+The subtitle displayed below the project name on the PDF cover page. Default: `'Project documentation'`. Omitting it or setting it to an empty string uses the default subtitle. Custom text is HTML-escaped and is only shown when a cover page is included via `print.coverUrl`.
+
+```js
+print: {
+  coverSubtitle: 'Technical proposal'
+}
+```
 
 ### `print.coverUrl`
 
