@@ -71,6 +71,7 @@ window.$docsify = {
   print: {
     tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
     coverSubtitle: 'Project documentation',  // subtitle on the PDF cover page
+    cssUrl: 'themes/cover-bottom-left.css',  // optional — PDF-only stylesheet(s)
     coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
     pageCoverUrl: '_media/watermark.jpg', // optional — background picture on every page
@@ -96,6 +97,37 @@ The subtitle displayed below the project name on the PDF cover page. Default: `'
 ```js
 print: {
   coverSubtitle: 'Technical proposal'
+}
+```
+
+### `print.cssUrl`
+
+Optional CSS for the exported PDF only. Set it to a stylesheet URL or an array of URLs. Relative paths are resolved against the Docsify page's base URL, so `themes/print.css` can sit next to your `index.html` in a `themes/` folder. You can also use an absolute URL.
+
+The plugin loads these stylesheets after its built-in print CSS and before measuring and paginating the document. When selectors have the same specificity, later files in the array win. If a stylesheet fails to load, the plugin logs a warning and continues without it. Omit the option to keep the default styling.
+
+Keep rules that change layout (such as font size, line height, or spacing) outside `@media print` so they also apply when the plugin measures the pages. The export uses fixed A4 sheets; changing `@page` alone won't change the sheet size.
+
+#### Example: cover text at the bottom left
+
+Save this as [`themes/cover-bottom-left.css`](docs/themes/cover-bottom-left.css) next to your `index.html`:
+
+```css
+.cover-content {
+  justify-content: flex-end;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0 18mm 20mm;
+}
+```
+
+Point `cssUrl` at the file and set `coverUrl` to enable the cover. The project name (`$docsify.name`) and `coverSubtitle` will move together, without changing the cover image or the on-screen Docsify theme.
+
+```js
+print: {
+  coverUrl: '_media/cover.jpg',
+  coverSubtitle: 'Project documentation',
+  cssUrl: 'themes/cover-bottom-left.css'
 }
 ```
 

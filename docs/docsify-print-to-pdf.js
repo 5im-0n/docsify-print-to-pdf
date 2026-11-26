@@ -1244,6 +1244,36 @@
     return new URL(url, window.location.origin + '/').href;
   }
 
+  /* Add optional overrides to the print document only. Append in config order
+     so equal-specificity rules in later files win, even if they load first. */
+  function loadPrintStylesheets(doc) {
+    var print = (window.$docsify && window.$docsify.print) || {};
+    var urls = Array.isArray(print.cssUrl) ? print.cssUrl : [print.cssUrl];
+    return Promise.all(urls.map(function (url) {
+      if (typeof url !== 'string' || !url.trim()) return;
+      var href;
+      try {
+        // Resolve against the Docsify page, including deployments under a subpath.
+        href = new URL(url.trim(), document.baseURI).href;
+      } catch (err) {
+        console.warn('[docsify-print-to-pdf] Invalid print stylesheet URL: ' + url);
+        return;
+      }
+      return new Promise(function (resolve) {
+        var link = doc.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.addEventListener('load', resolve, { once: true });
+        link.addEventListener('error', function () {
+          link.remove();
+          console.warn('[docsify-print-to-pdf] Could not load print stylesheet: ' + href);
+          resolve();
+        }, { once: true });
+        doc.head.appendChild(link);
+      });
+    }));
+  }
+
   async function build() {
     var chapters = await getChapters();
     // Hierarchical chapter numbers ("1.", "2.", "3.1", …) derived from the
@@ -1369,7 +1399,8 @@
     doc.open();
     doc.write(pageHtml(coverUrl, backUrl, pageCoverUrl, chapters, chunks.join('\n')));
     doc.close();
-    await waitForImages(doc);
+    // Layout overrides must be in place before paginate() measures the sheets.
+    await Promise.all([loadPrintStylesheets(doc), waitForImages(doc)]);
     // Drop the back page if its image failed to load, so the PDF never
     // contains a broken back cover.
     var backPage = doc.querySelector('.back-page');

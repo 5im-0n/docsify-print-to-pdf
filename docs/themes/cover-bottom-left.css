@@ -1,0 +1,11 @@
+/* Keep the project name and subtitle together at the lower left of the PDF cover. */
+.cover-content {
+  justify-content: flex-end;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0 20mm 50mm;
+}
+
+.cover-content .cover-subtitle {
+  font-size: 20px;
+}
