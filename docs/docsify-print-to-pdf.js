@@ -430,19 +430,25 @@
     ].join('\n');
   }
 
+  // Firefox writes PDF page boxes in whole points. Use the same dimensions
+  // for its page and sheet so the artwork isn't clipped short of the edge.
+  var WHOLE_POINT_PAGES = /\bFirefox\/\d/.test(navigator.userAgent);
+  var SHEET_WIDTH = WHOLE_POINT_PAGES ? '596pt' : '210mm';
+  var SHEET_HEIGHT = WHOLE_POINT_PAGES ? '842pt' : '297mm';
+
   function printLayoutStyles() {
     var css = [
-      /* Use a named A4 page so a generic @page rule in a site stylesheet
-         doesn't resize our explicit 210x297mm sheets or add print margins. */
-      '@page docsify-pdf{size:A4;margin:0}',
+      /* A named page keeps generic site @page rules from resizing sheets. */
+      '@page docsify-pdf{size:' + (WHOLE_POINT_PAGES ? SHEET_WIDTH + ' ' + SHEET_HEIGHT : 'A4') + ';margin:0}',
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}',
       'html.docsify-print,html.docsify-print body{display:block;position:static;overflow:visible;' +
         'width:auto;height:auto;min-width:0;min-height:0;max-width:none;max-height:none;margin:0;padding:0}',
       'html.docsify-print body{page:docsify-pdf}',
-      '.cover-page,.back-page,.full-page-image,.page-sheet,.sheet-flow{box-sizing:border-box}',
+      '.cover-page,.back-page,.full-page-image,.page-sheet{box-sizing:border-box;' +
+        'position:relative;width:' + SHEET_WIDTH + ';height:' + SHEET_HEIGHT + ';overflow:hidden}',
+      '.sheet-flow{box-sizing:border-box}',
       /* --- cover (page 1, full-bleed, no footer) --- */
-      '.cover-page{position:relative;width:210mm;height:297mm;overflow:hidden;' +
-        'page-break-after:always;break-after:page}',
+      '.cover-page{page-break-after:always;break-after:page}',
       '.cover-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
       '.cover-content{position:relative;z-index:1;height:100%;display:flex;' +
         'flex-direction:column;justify-content:center;align-items:center;text-align:center;' +
@@ -457,18 +463,20 @@
          the next element can make the print engine emit an extra blank page
          before the back cover. The preceding sheet's break-after alone
          guarantees the back cover still starts on its own fresh page. */
-      '.back-page{position:relative;width:210mm;height:297mm;overflow:hidden;background:#fff}',
+      '.back-page{background:#fff}',
       '.back-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}',
       /* --- reusable full-page images (no margins, watermark or footer) --- */
-      '.full-page-image{position:relative;width:210mm;height:297mm;padding:0;' +
-        'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
+      '.full-page-image{padding:0;page-break-after:always;break-after:page;background:#fff}',
       '.full-page-image img{display:block;position:absolute;inset:0;width:100%;height:100%;' +
         'max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;' +
         'object-fit:contain;object-position:center;opacity:1}',
       '.full-page-image[data-fit="cover"] img{object-fit:cover}',
       /* --- inner pages (table of contents + chapters) --- */
-      '.page-sheet{position:relative;width:210mm;height:297mm;padding:20mm 18mm;' +
-        'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
+      '.page-sheet{padding:20mm 18mm;page-break-after:always;break-after:page;background:#fff}',
+      // Put the extra fraction of a point in the right and bottom margins,
+      // not in the chapter or TOC area used to calculate page breaks.
+      WHOLE_POINT_PAGES ? '.page-sheet{padding-right:calc(18mm + 596pt - 210mm);' +
+        'padding-bottom:calc(20mm + 842pt - 297mm)}' : '',
       /* Docsify themes style .markdown-section as a web layout container.
          Restore the sheet dimensions; 0.1px vertical padding prevents child
          margins from collapsing out of the flow during measurement. */
@@ -1322,9 +1330,11 @@
       frame = document.createElement('iframe');
       frame.id = 'print-frame';
       frame.setAttribute('aria-hidden', 'true');
-      // Sized to A4 (210x297mm at 96dpi) so on-screen layout matches print.
-      // Hidden off-screen (not display:none, which would break measuring/printing).
-      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+      // Match the print sheet viewport. Keep the iframe off-screen rather
+      // than display:none so its content can be measured and printed.
+      frame.style.cssText = 'position:fixed;left:-10000px;top:0;border:0;' +
+        'width:' + (WHOLE_POINT_PAGES ? SHEET_WIDTH : '794px') + ';' +
+        'height:' + (WHOLE_POINT_PAGES ? SHEET_HEIGHT : '1123px');
       document.body.appendChild(frame);
     }
     return frame;
