@@ -4,7 +4,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 
 ## Features
 
-- **One click, whole document** — reads `_sidebar.md` to learn the chapters (title, order and nesting) and renders every chapter into one printable document.
+- **One click, whole document** — reads `_sidebar.md` for chapter order and nesting, then uses Docsify's rendered chapter HTML, including plugin output such as Flexible Alerts, to build one printable document.
 - **Optional cover page** — if you set `print.coverUrl`, the image is used as a full-bleed cover with the project name (taken from `window.$docsify.name`). When not set, no cover page is inserted.
 - **Optional back cover page** — if you set `print.backUrl`, a full-bleed image page is appended at the end of the PDF. When not set, no back page is inserted.
 - **Optional per-page background** — if you set `print.pageCoverUrl`, that picture is painted semi-transparently behind the content of every page (table of contents and chapters), like a watermark; `print.pageCoverOpacity` (default `0.5`) controls its transparency. When not set, the pages stay plain white.
@@ -26,19 +26,17 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - A Docsify site with:
   - `loadSidebar: true` and a `_sidebar.md` listing the chapters (standard `- [Title](file)` syntax, indented with two spaces per nesting level).
   - An **optional** cover image (via `print.coverUrl`), an **optional** back-cover image (via `print.backUrl`) and an **optional** background picture behind the content of every page (via `print.pageCoverUrl`) — if none is set, the PDF simply starts with the table of contents on plain white pages and ends after the last chapter (see [Configuration](#configuration)).
-  - [markdown-it](https://github.com/markdown-it/markdown-it) loaded on the page — the plugin uses it to render the markdown of each chapter.
+  - The Docsify app and its plugins must be able to run in a same-origin iframe. No separate Markdown renderer is needed.
 
 ## Usage
 
 ### 1. Add the script
 
-Copy `docs/docsify-print-to-pdf.js` into your site (or load it from a CDN, see below) and include it in `index.html` **after** Docsify and markdown-it:
+Copy `docs/docsify-print-to-pdf.js` into your site (or load it from a CDN, see below) and include it in `index.html` **after** Docsify and any other Docsify plugins, before Docsify initializes:
 
 ```html
 <!-- Docsify -->
 <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
-<!-- Markdown renderer used by the Print-to-PDF export -->
-<script src="//cdn.jsdelivr.net/npm/markdown-it@13/dist/markdown-it.min.js"></script>
 <!-- Print-to-PDF button -->
 <script src="docsify-print-to-pdf.js"></script>
 ```
@@ -108,7 +106,7 @@ Default: `true`. The export copies the site's active stylesheet links and inline
 
 Set `inheritSiteStyles: false` to skip copying site styles and use the built-in content styling instead. This does not disable `print.cssUrl`.
 
-Only styles are copied, not plugin scripts or the site's rendered HTML. If a plugin transforms Markdown or creates markup that the export doesn't produce, its CSS alone won't reproduce the feature. Site rules that change layout only under `@media print` can also cause pagination differences; disable inheritance if those rules conflict with the export.
+Docsify and its plugins run in a separate source iframe. The print iframe gets the rendered chapter HTML and, by default, site styles, but does not run the Docsify app. Interactive features that require scripts or markup added after Docsify's `doneEach` hook may not appear as they do on the site. Site rules that change layout only under `@media print` can cause pagination differences; disable inheritance if those rules conflict with the export.
 
 ### `print.cssUrl`
 
@@ -335,7 +333,7 @@ To fill the page completely and crop excess at the edges:
 ## How it works
 
 1. Reads `_sidebar.md` to build the ordered chapter list (with nesting depth, capped by `maxLevel`).
-2. Fetches every chapter's markdown file and renders it with `markdown-it` (images/links are absolutized so they survive in the standalone document), converts `<!-- page-break -->` markers into forced page breaks and `<!-- full-page-image -->` directives into dedicated image pages, and collects the file's sub-headings (up to `subMaxLevel`) for the table of contents.
+2. Visits each chapter route in a reusable, off-screen Docsify iframe, waits for `doneEach`, and copies the rendered chapter. The visible page does not navigate. It resolves links and images against the source document, processes page-break and full-page-image markers, and collects sub-headings for the table of contents.
 3. Assembles a document: (optional) full-bleed cover (`print.coverUrl`) → table of contents → all chapters → (optional) full-bleed back cover (`print.backUrl`). If `coverUrl` or `backUrl` is not set, the corresponding page is left out and the page numbers adjust accordingly. With `print.pageCoverUrl`, that picture is also painted semi-transparently behind the content of every inner page (`print.pageCoverOpacity`, default `0.5`).
 4. Paginates the content into explicit `210 × 297 mm` "sheets" (one sheet = one printed page) and places a real, absolutely positioned footer with the page number at the bottom-right of every normal content/TOC page, excluding covers and full-page images (so without a cover, the TOC is page 1).
 5. Renders the result in a hidden same-origin iframe and triggers `print()`, so the user can save it as a PDF.
@@ -354,7 +352,7 @@ printPdf.print();   // open the print dialog for the last built document
 
 ## Troubleshooting
 
-- **"markdown-it is not loaded"** — add `<script src="//cdn.jsdelivr.net/npm/markdown-it@13/dist/markdown-it.min.js"></script>` before the plugin.
+- **"Docsify did not finish rendering …"** — check that the route loads normally, the site allows same-origin framing, and the exporter script is loaded before Docsify initializes. With history routing, the server must serve the Docsify app for chapter URLs.
 - **"Could not load _sidebar.md"** — make sure `loadSidebar: true` is set and the file exists next to `index.html`.
 - **"No chapters found in _sidebar.md"** — check that sidebar entries use the `- [Title](file)` syntax.
 - **Broken images in the PDF** — if you configured `coverUrl`/`backUrl`/`pageCoverUrl`, make sure the images exist and are reachable; a back image that fails to load is dropped automatically, a missing cover simply means no cover page, and a page background that fails to load simply leaves the pages white. Chapter images should use relative paths that resolve against the site URL.

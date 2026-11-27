@@ -2,7 +2,7 @@
  *
  * On click it:
  *   1. reads _sidebar.md to learn the chapters (title + order, same as the sidebar)
- *   2. fetches every chapter markdown file and renders it with markdown-it
+ *   2. renders each Docsify route in a reusable off-screen iframe and copies its chapter HTML
  *   3. assembles a printable document: table of contents + all chapters, with
  *      an optional full-bleed cover page (print.coverUrl) and an optional
  *      full-bleed back cover page (print.backUrl) — if neither is configured,
@@ -182,10 +182,14 @@
   }
 
   /* --------------------------------------------------------- chapters list */
-  function linkToFile(link) {
-    if (!link || link === '/') return 'README.md';
-    if (link.charAt(link.length - 1) === '/') return link + 'README.md';
-    return link + '.md';
+  var DOCSIFY_CONFIG = window.$docsify || {};
+  var HISTORY_MODE = DOCSIFY_CONFIG.routerMode === 'history';
+
+  function siteBase() {
+    // Hash routes keep the site entry point in the pathname. History routes
+    // can be nested, so use the site's <base> or the origin for shared files.
+    return new URL(HISTORY_MODE && !document.querySelector('base[href]') ? '/' : './',
+      document.baseURI);
   }
 
   function sidebarPathForCurrentRoute() {
@@ -205,15 +209,30 @@
     return match[1] + '/_sidebar.md';
   }
 
+  function chapterRoute(link, sidebarPath) {
+    // Skip external and heading-only links. For relativePath sites, resolve
+    // entries against the directory containing the sidebar.
+    link = link.trim();
+    if (!link || /^(?:#(?!\/)|[\w+.-]+:|\/\/)/.test(link)) return null;
+    link = link.replace(/^#/, '').split(/[?#]/)[0].replace(/\.md$/i, '');
+    if (!link) return null;
+    var base = new URL('/', window.location.origin);
+    if (DOCSIFY_CONFIG.relativePath) {
+      base = new URL(sidebarPath, HISTORY_MODE ? siteBase() : base);
+    }
+    return new URL(link, base).pathname;
+  }
+
   async function getChapters() {
     var sidebarPath = sidebarPathForCurrentRoute();
-    var res = await fetch(sidebarPath, { cache: 'no-cache' });
+    var base = siteBase();
+    var res = await fetch(new URL(sidebarPath, base), { cache: 'no-cache' });
 
     // Keep the existing single-sidebar behavior when the route has no
     // corresponding sidebar of its own.
     if (!res.ok && sidebarPath !== '_sidebar.md') {
       sidebarPath = '_sidebar.md';
-      res = await fetch(sidebarPath, { cache: 'no-cache' });
+      res = await fetch(new URL(sidebarPath, base), { cache: 'no-cache' });
     }
     if (!res.ok) throw new Error('Could not load ' + sidebarPath);
 
@@ -225,9 +244,10 @@
     var re = /^([ \t]*)- \[([^\]]+)\]\(([^)]+)\)/gm;
     var m;
     while ((m = re.exec(text)) !== null) {
-      chapters.push({
+      var route = chapterRoute(m[3], sidebarPath);
+      if (route !== null) chapters.push({
         title: m[2],
-        file: linkToFile(m[3]),
+        route: route,
         depth: Math.floor(m[1].length / 2)
       });
     }
@@ -256,30 +276,107 @@
   }
 
   /* ------------------------------------------------------------ rendering */
-  var md = null;
-  function renderer() {
-    if (!md) {
-      if (typeof window.markdownit !== 'function') {
-        throw new Error('markdown-it is not loaded — add it to index.html.');
-      }
-      md = window.markdownit({ html: true, linkify: true, typographer: true });
-    }
-    return md;
+  var SOURCE_FRAME_ATTR = 'data-docsify-print-source';
+  var ROUTE_READY = 'docsify-print-route-ready';
+
+  // This branch runs in the source iframe, where Docsify and the site's
+  // plugins initialise normally. Signal after the synchronous doneEach
+  // callbacks, including any installed after ours, have finished.
+  function installSourceHook(frame) {
+    var config = window.$docsify = window.$docsify || {};
+    config.plugins = [].concat(config.plugins || [], function (hook, vm) {
+      hook.doneEach(function () {
+        var path = vm.route.path;
+        setTimeout(function () {
+          frame.dispatchEvent(new CustomEvent(ROUTE_READY, { detail: path }));
+        }, 0);
+      });
+    });
   }
 
-  /* Make relative image/link URLs absolute against the chapter's folder,
-     otherwise they would break inside the standalone print document. */
-  function absolutize(root, baseDir) {
-    var base = window.location.origin + '/' + (baseDir || '');
-    root.querySelectorAll('img').forEach(function (img) {
-      var src = img.getAttribute('src');
-      if (!src || /^(https?:|data:|blob:)/i.test(src)) return;
-      img.src = new URL(src, base).href;
+  function sourceFrame() {
+    var frame = document.createElement('iframe');
+    frame.setAttribute(SOURCE_FRAME_ATTR, '');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1024px;height:768px;border:0';
+    return frame;
+  }
+
+  function copyChapter(content) {
+    var holder = content.cloneNode(true);
+    // Preserve the rendered markup, but don't copy chapter script tags.
+    holder.querySelectorAll('script').forEach(function (script) { script.remove(); });
+    holder.querySelectorAll('[href], [src], [poster]').forEach(function (el) {
+      ['href', 'src', 'poster'].forEach(function (attr) {
+        var url = el.getAttribute(attr);
+        if (!url || /^#(?!\/)/.test(url)) return;
+        try {
+          el.setAttribute(attr, new URL(url, content.baseURI).href);
+        } catch (err) {
+          // Leave invalid or plugin-specific URL values alone.
+        }
+      });
     });
-    root.querySelectorAll('a').forEach(function (a) {
-      var href = a.getAttribute('href');
-      if (!href || /^(https?:|mailto:|tel:|#)/i.test(href)) return;
-      a.href = new URL(href, base).href;
+    holder.querySelectorAll('img[loading="lazy"]').forEach(function (img) {
+      img.removeAttribute('loading');
+    });
+    return holder;
+  }
+
+  function loadChapter(frame, route) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        finish(new Error('Docsify did not finish rendering ' + route +
+          '. Check that the site can load in a same-origin iframe.'));
+      }, 15000);
+      function finish(err, holder) {
+        clearTimeout(timer);
+        frame.removeEventListener(ROUTE_READY, onReady);
+        if (err) reject(err);
+        else resolve(holder);
+      }
+      function onReady(event) {
+        // The app may emit a completion event for another route on startup.
+        var path = new URL(event.detail || '/', window.location.origin).pathname;
+        if (path !== route) return;
+        try {
+          var content = frame.contentDocument.querySelector('.markdown-section');
+          if (!content || content.textContent.trim() === '404 - Not found') {
+            throw new Error('Could not read the rendered Docsify chapter at ' + route);
+          }
+          finish(null, copyChapter(content));
+        } catch (err) {
+          finish(err);
+        }
+      }
+      frame.addEventListener(ROUTE_READY, onReady);
+      try {
+        if (!frame.isConnected) {
+          var url = new URL(window.location.href);
+          if (HISTORY_MODE) {
+            url.pathname = route;
+            url.search = '';
+            url.hash = '';
+          } else {
+            url.hash = route;
+          }
+          frame.src = url.href;
+          document.body.appendChild(frame);
+        } else {
+          var child = frame.contentWindow;
+          if (HISTORY_MODE) {
+            child.history.replaceState(null, '', route);
+            child.dispatchEvent(new child.PopStateEvent('popstate'));
+          } else {
+            var next = new URL(child.location.href);
+            next.hash = route;
+            child.location.replace(next.href);
+          }
+        }
+      } catch (err) {
+        finish(err);
+      }
     });
   }
 
@@ -1320,9 +1417,24 @@
     }));
   }
 
+  async function renderChapters(chapters) {
+    var frame = sourceFrame();
+    var rendered = new Map();
+    try {
+      for (var i = 0; i < chapters.length; i++) {
+        var ch = chapters[i];
+        if (!rendered.has(ch.route)) rendered.set(ch.route, await loadChapter(frame, ch.route));
+        ch.content = rendered.get(ch.route).cloneNode(true);
+      }
+    } finally {
+      frame.remove();
+    }
+  }
+
   async function build() {
     var print = (window.$docsify && window.$docsify.print) || {};
     var chapters = await getChapters();
+    await renderChapters(chapters);
     // Hierarchical chapter numbers ("1.", "2.", "3.1", …) derived from the
     // sidebar nesting — only when print.headingNumbers is enabled. One
     // counter is kept per nesting depth; a deeper chapter resets every
@@ -1348,17 +1460,10 @@
     var tocOrder = 0;
     for (var i = 0; i < chapters.length; i++) {
       var ch = chapters[i];
-      var res = await fetch(ch.file, { cache: 'no-cache' });
-      if (!res.ok) throw new Error('Could not load ' + ch.file);
-      var markdown = await res.text();
-      var holder = document.createElement('div');
-      holder.innerHTML = renderer().render(markdown);
-      // Convert "<!-- page-break -->" comments to marker elements so both
-      // spellings of a page break work (see normalizePageBreaks).
+      var holder = ch.content;
+      // Keep export directives in the rendered chapter working as before.
       normalizePageBreaks(holder);
       normalizeFullPageImages(holder);
-      var dir = ch.file.indexOf('/') !== -1 ? ch.file.replace(/[^/]*$/, '') : '';
-      absolutize(holder, dir);
       // Sub-headings of this file (the h1 chapter title itself comes from
       // the sidebar): h2..h(subMaxLevel+1), capped so the total nesting
       // depth never exceeds maxLevel. Each one is stamped with a global
@@ -1395,19 +1500,20 @@
           for (var l2 = 2; l2 <= level; l2++) parts.push(secCounters[l2] || 0);
           numberLabel = parts.join('.');
         }
-        if (numberLabel) prefixHeadingNumber(h, numberLabel);
-        // Make the heading clickable: wrap its content in a link back to the
-        // table of contents. styles() keeps the link invisible, so headings
-        // look exactly as before. Wrapping after prefixHeadingNumber also
-        // puts the number inside the link. Headings that already contain a
-        // link are left alone (an <a> cannot contain another <a>).
-        if (!h.querySelector('a')) {
-          var backLink = document.createElement('a');
-          backLink.className = 'print-toc-link';
-          backLink.href = '#toc';
+        // Reuse Docsify's heading permalink as the return link to the PDF TOC.
+        // Leave headings with other links alone to avoid nesting anchors.
+        var backLink = h.querySelector(':scope > a.anchor[data-id]');
+        if (!backLink && !h.querySelector('a')) {
+          backLink = holder.ownerDocument.createElement('a');
           while (h.firstChild) backLink.appendChild(h.firstChild);
           h.appendChild(backLink);
         }
+        if (backLink) {
+          backLink.href = '#toc';
+          backLink.classList.add('print-toc-link');
+          backLink.removeAttribute('target');
+        }
+        if (numberLabel) prefixHeadingNumber(backLink || h, numberLabel);
         if (level === 1) return; // chapter title — not a TOC row of its own
         if (level > SUB_MAX_LEVEL + 1) return; // deeper than subMaxLevel
         if (ch.depth + level - 1 >= MAX_LEVEL) return; // deeper than maxLevel
@@ -1501,6 +1607,12 @@
     } finally {
       if (btn) btn.textContent = 'Print to PDF';
     }
+  }
+
+  var parentFrame = window.frameElement;
+  if (parentFrame && parentFrame.hasAttribute(SOURCE_FRAME_ATTR)) {
+    installSourceHook(parentFrame);
+    return;
   }
 
   /* Exposed for debugging / automated testing. */
