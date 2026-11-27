@@ -2,41 +2,47 @@
   <title id="title">Project roadmap</title>
   <desc id="description">A three-stage project roadmap: map the current system, design the target architecture, and plan the budget and timeline.</desc>
   <defs>
+    <!-- Lavender, electric blue, cyan and magenta from the cover artwork. -->
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
-      <stop stop-color="#101a32"/>
-      <stop offset="1" stop-color="#071323"/>
+      <stop stop-color="#f2eaff"/>
+      <stop offset=".52" stop-color="#dfd2fa"/>
+      <stop offset="1" stop-color="#cbdcff"/>
     </linearGradient>
-    <linearGradient id="route" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
-      <stop stop-color="#6be8cc"/>
-      <stop offset=".55" stop-color="#aab7ff"/>
-      <stop offset="1" stop-color="#ffd297"/>
+    <linearGradient id="chart" x1="0" y1="1" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#273669"/>
+      <stop offset="1" stop-color="#402c5b"/>
+    </linearGradient>
+    <linearGradient id="route" x1="0" y1="1" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#78f8fa"/>
+      <stop offset=".52" stop-color="#b9a7f9"/>
+      <stop offset="1" stop-color="#f6b4f7"/>
     </linearGradient>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-      <path d="M24 0H0v24" fill="none" stroke="#afc9e5" stroke-opacity=".12"/>
+      <path d="M24 0H0v24" fill="none" stroke="#c4b6f9" stroke-opacity=".16"/>
     </pattern>
     <clipPath id="artwork"><rect x="48" y="368" width="744" height="297" rx="20"/></clipPath>
   </defs>
 
   <rect width="840" height="1188" fill="url(#background)"/>
   <g font-family="system-ui, sans-serif">
-    <g font-family="monospace" font-size="13" letter-spacing="2.2" fill="#b1c3db">
+    <g font-family="monospace" font-size="13" letter-spacing="2.2" fill="#513f78">
       <text x="48" y="65">PROJECT DOCUMENTATION</text>
       <text x="792" y="65" text-anchor="end">VISUAL SUMMARY</text>
     </g>
-    <path d="M48 87h744" stroke="#39506b"/>
-    <path d="M48 87h84" stroke="#6be8cc" stroke-width="2"/>
+    <path d="M48 87h744" stroke="#aa96d0"/>
+    <path d="M48 87h84" stroke="#7747f8" stroke-width="2"/>
 
-    <g fill="#f3f6ff" font-size="90" font-weight="750" letter-spacing="-4">
+    <g fill="#302345" font-size="90" font-weight="750" letter-spacing="-4">
       <text x="44" y="196">Project</text>
       <text x="44" y="279">roadmap</text>
     </g>
-    <text x="49" y="327" fill="#bfcee2" font-size="22">From the current system to a delivery plan.</text>
+    <text x="49" y="327" fill="#513f78" font-size="22">From the current system to a delivery plan.</text>
 
     <g clip-path="url(#artwork)">
-      <rect x="48" y="368" width="744" height="297" fill="#0d2039"/>
+      <rect x="48" y="368" width="744" height="297" fill="url(#chart)"/>
       <rect x="48" y="368" width="744" height="297" fill="url(#grid)"/>
 
-      <g fill="none" stroke="#9fb8d6" stroke-opacity=".24">
+      <g fill="none" stroke="#c4b6f9" stroke-opacity=".27">
         <path d="M143 379v273m288-273v273m262-273v273" stroke-dasharray="3 6"/>
         <path d="M63 590h715m-715-79h715m-715-79h715" stroke-dasharray="3 6"/>
         <circle cx="143" cy="590" r="38"/><circle cx="143" cy="590" r="58"/>
@@ -47,48 +53,48 @@
       </g>
       <path d="M143 590c146 0 114-79 288-79 162 0 126-79 262-79" fill="none" stroke="url(#route)" stroke-width="13" stroke-opacity=".15" stroke-linecap="round"/>
       <path d="M143 590c146 0 114-79 288-79 162 0 126-79 262-79" fill="none" stroke="url(#route)" stroke-width="3.5" stroke-linecap="round"/>
-      <g fill="#0d2039" stroke-width="2">
-        <circle cx="143" cy="590" r="19" stroke="#6be8cc"/>
-        <circle cx="431" cy="511" r="19" stroke="#aab7ff"/>
-        <circle cx="693" cy="432" r="19" stroke="#ffd297"/>
+      <g fill="#302345" stroke-width="2">
+        <circle cx="143" cy="590" r="19" stroke="#78f8fa"/>
+        <circle cx="431" cy="511" r="19" stroke="#b9a7f9"/>
+        <circle cx="693" cy="432" r="19" stroke="#f6b4f7"/>
       </g>
       <g font-family="monospace" font-size="13" font-weight="700" text-anchor="middle">
-        <text x="143" y="595" fill="#6be8cc">01</text>
-        <text x="431" y="516" fill="#aab7ff">02</text>
-        <text x="693" y="437" fill="#ffd297">03</text>
+        <text x="143" y="595" fill="#78f8fa">01</text>
+        <text x="431" y="516" fill="#b9a7f9">02</text>
+        <text x="693" y="437" fill="#f6b4f7">03</text>
       </g>
-      <g fill="#90accb" font-family="monospace" font-size="11" letter-spacing="1.8">
+      <g fill="#e0d5fa" font-family="monospace" font-size="11" letter-spacing="1.8">
         <text x="73" y="404">PROJECT PHASES</text>
         <text x="765" y="638" text-anchor="end">CURRENT STATE → DELIVERY</text>
       </g>
     </g>
-    <rect x="48.5" y="368.5" width="743" height="296" rx="20" fill="none" stroke="#314b69"/>
+    <rect x="48.5" y="368.5" width="743" height="296" rx="20" fill="none" stroke="#7763a5"/>
 
-    <g font-family="monospace" font-size="13" letter-spacing="2.2" fill="#b1c3db">
+    <g font-family="monospace" font-size="13" letter-spacing="2.2" fill="#513f78">
       <text x="48" y="719">PHASE</text>
       <text x="143" y="719">FOCUS</text>
     </g>
-    <path d="M48 737h744m-744 114h744m-744 114h744m-744 114h744" stroke="#39506b"/>
+    <path d="M48 737h744m-744 114h744m-744 114h744m-744 114h744" stroke="#aa96d0"/>
     <g font-family="monospace" font-size="17" font-weight="700" text-anchor="middle">
-      <rect x="48" y="766" width="52" height="52" rx="12" fill="#142e38" stroke="#356660"/>
-      <text x="74" y="798" fill="#6be8cc">01</text>
-      <rect x="48" y="880" width="52" height="52" rx="12" fill="#202b4b" stroke="#505c90"/>
-      <text x="74" y="912" fill="#aab7ff">02</text>
-      <rect x="48" y="994" width="52" height="52" rx="12" fill="#302a32" stroke="#715a4d"/>
-      <text x="74" y="1026" fill="#ffd297">03</text>
+      <rect x="48" y="766" width="52" height="52" rx="12" fill="#c2f5ff" stroke="#639eec"/>
+      <text x="74" y="798" fill="#204a99">01</text>
+      <rect x="48" y="880" width="52" height="52" rx="12" fill="#d5c6ff" stroke="#9e84df"/>
+      <text x="74" y="912" fill="#4f2c9a">02</text>
+      <rect x="48" y="994" width="52" height="52" rx="12" fill="#f6d2f5" stroke="#c08bce"/>
+      <text x="74" y="1026" fill="#782b83">03</text>
     </g>
-    <g fill="#f3f6ff" font-size="30" font-weight="700">
+    <g fill="#302345" font-size="30" font-weight="700">
       <text x="143" y="787">Map the current system</text>
       <text x="143" y="901">Design the target system</text>
       <text x="143" y="1015">Plan the delivery</text>
     </g>
-    <g fill="#bfcee2" font-size="18">
+    <g fill="#513f78" font-size="18">
       <text x="143" y="817">Document what exists and where changes are needed.</text>
       <text x="143" y="931">Define the proposed architecture and what’s out of scope.</text>
       <text x="143" y="1045">Estimate the budget, set milestones, and assign owners.</text>
     </g>
 
-    <g fill="#90accb" font-family="monospace" font-size="12" letter-spacing="2">
+    <g fill="#513f78" font-family="monospace" font-size="12" letter-spacing="2">
       <text x="48" y="1137">AS-IS / TO-BE / DELIVERY</text>
       <text x="792" y="1137" text-anchor="end">A4 · 210 × 297 MM</text>
     </g>
