@@ -18,6 +18,7 @@ A "Print to PDF" button for [Docsify](https://docsify.js.org/) that assembles yo
 - **List and table pagination** — long lists split between top-level items and long tables split between rows instead of leaving most of the preceding page blank. Ordered-list numbering continues correctly.
 - **Optional repeated table headers** — `print.repeatTableHeaders` repeats `<thead>` on table continuation pages when enabled.
 - **Optional heading numbers** — `print.headingNumbers` prepends hierarchical numbers (`1. Introduction`, `2. As-Is`, `2.1 Architecture`, …) to the table-of-contents rows and to the headings themselves.
+- **Site styles in the PDF** — site stylesheets, including styles injected by plugins, apply to exported chapter content by default. The exporter still owns the A4 layout; use `print.cssUrl` for print-specific overrides.
 - **Self-contained output** — relative images/links are rewritten to absolute URLs so they work inside the standalone print document.
 
 ## Requirements
@@ -71,6 +72,7 @@ window.$docsify = {
   print: {
     tocTitle: 'Table of Contents',  // heading of the TOC page in the exported PDF
     coverSubtitle: 'Project documentation',  // subtitle on the PDF cover page
+    inheritSiteStyles: true,       // reuse site stylesheets in the PDF (default: true)
     cssUrl: 'themes/cover-bottom-left.css',  // optional — PDF-only stylesheet(s)
     coverUrl: '_media/cover.jpg',   // optional — cover image, omit for no cover page
     backUrl: '_media/back.jpg',     // optional — back-cover image, omit for no back page
@@ -99,6 +101,14 @@ print: {
   coverSubtitle: 'Technical proposal'
 }
 ```
+
+### `print.inheritSiteStyles`
+
+Default: `true`. The export copies the site's active stylesheet links and inline `<style>` blocks into the print iframe, including styles injected by plugins. Chapter content uses the `.markdown-section` class so Docsify theme and plugin selectors can match it. The exporter keeps its own A4 sheets, margins, covers, table of contents, and footers.
+
+Set `inheritSiteStyles: false` to skip copying site styles and use the built-in content styling instead. This does not disable `print.cssUrl`.
+
+Only styles are copied, not plugin scripts or the site's rendered HTML. If a plugin transforms Markdown or creates markup that the export doesn't produce, its CSS alone won't reproduce the feature. Site rules that change layout only under `@media print` can also cause pagination differences; disable inheritance if those rules conflict with the export.
 
 ### `print.cssUrl`
 

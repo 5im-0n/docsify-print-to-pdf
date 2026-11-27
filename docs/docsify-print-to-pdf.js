@@ -158,6 +158,7 @@
   /* ---------------------------------------------------------------- button */
   function makeButton() {
     var style = document.createElement('style');
+    style.id = 'print-pdf-button-style';
     style.textContent =
       '#print-pdf-btn{position:fixed;right:16px;bottom:16px;z-index:99999;' +
       'padding:11px 18px;border:none;border-radius:8px;cursor:pointer;' +
@@ -284,12 +285,8 @@
 
   /* ------------------------------------------------------------- assembly */
 
-  /* Copy the site's --theme-* custom properties (e.g. --theme-color) onto the
-     print document's :root. The PDF is assembled in a standalone same-origin
-     iframe, which does not inherit CSS variables from the hosting page, so
-     this re-declares them there; every var(--theme-*) in styles() then
-     resolves to the site's actual docsify theme, with the docsify defaults
-     (vue.css) as fallbacks. */
+  /* The iframe does not inherit custom properties from the host. Use its
+     computed --theme-* values as fallbacks, even if site CSS is disabled. */
   function themeRoot() {
     var computed = getComputedStyle(document.documentElement);
     var props = [];
@@ -303,17 +300,49 @@
     return props.length ? ':root{' + props.join(';') + '}' : '';
   }
 
-  function styles() {
-    var css = [
-      /* A4, zero margins. Every page of the PDF is an explicit .sheet /
-         .page-sheet element exactly 210x297mm, so one sheet == one printed
-         page and the page-number footer (a real element inside each sheet)
-         is guaranteed to appear, independent of the engine's pagination. */
-      '@page{size:A4;margin:0}',
-      '*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
-      'html,body{margin:0;padding:0}',
+  /* Keep a baseline for unthemed chapters and for exports that opt out of
+     site styles. A low-priority layer lets theme and plugin rules win. */
+  function fallbackStyles() {
+    return [
+      '@layer docsify-print-fallback{',
+      themeRoot(),
+      '*{box-sizing:border-box}',
       'body{font:12pt/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;' +
         'color:var(--theme-text-color,#34495e)}',
+      '.sheet-flow h1{font-size:23pt}',
+      '.sheet-flow h2{font-size:16pt}',
+      '.sheet-flow h3{font-size:13pt}',
+      '.sheet-flow p{margin:0 0 10px}',
+      '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;' +
+        'border-left:4px solid var(--theme-blockquote-border,var(--theme-color,#42b983));' +
+        'background:var(--theme-blockquote-background,#f6faf8);' +
+        'color:var(--theme-blockquote-color,#858585);border-radius:0 6px 6px 0}',
+      '.sheet-flow blockquote p{margin:0}',
+      '.sheet-flow ul,.sheet-flow ol{margin:0 0 10px;padding-left:24px}',
+      '.sheet-flow pre{overflow:auto;border:1px solid #e1e4e8;padding:12px}',
+      '.sheet-flow code{font:10.5pt "Courier New",monospace;padding:1px 5px}',
+      '.sheet-flow pre,.sheet-flow code{background:var(--theme-code-background,#f8f8f8);border-radius:4px}',
+      '.sheet-flow pre code{background:none;padding:0;color:var(--theme-code-color,#525252)}',
+      '.sheet-flow table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11pt}',
+      '.sheet-flow th,.sheet-flow td{border:1px solid var(--theme-table-border-color,#ddd);' +
+        'padding:6px 10px;text-align:left}',
+      '.sheet-flow th{background:var(--theme-table-th-background,#f8f8f8)}',
+      '.sheet-flow img{max-width:100%;border-radius:4px}',
+      '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}',
+      '}'
+    ].join('\n');
+  }
+
+  function printLayoutStyles() {
+    var css = [
+      /* Use a named A4 page so a generic @page rule in a site stylesheet
+         doesn't resize our explicit 210x297mm sheets or add print margins. */
+      '@page docsify-pdf{size:A4;margin:0}',
+      '*{-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+      'html.docsify-print,html.docsify-print body{display:block;position:static;overflow:visible;' +
+        'width:auto;height:auto;min-width:0;min-height:0;max-width:none;max-height:none;margin:0;padding:0}',
+      'html.docsify-print body{page:docsify-pdf}',
+      '.cover-page,.back-page,.full-page-image,.page-sheet,.sheet-flow{box-sizing:border-box}',
       /* --- cover (page 1, full-bleed, no footer) --- */
       '.cover-page{position:relative;width:210mm;height:297mm;overflow:hidden;' +
         'page-break-after:always;break-after:page}',
@@ -343,11 +372,12 @@
       /* --- inner pages (table of contents + chapters) --- */
       '.page-sheet{position:relative;width:210mm;height:297mm;padding:20mm 18mm;' +
         'overflow:hidden;page-break-after:always;break-after:page;background:#fff}',
-      /* padding-top/bottom of 0.1px stop the first/last child margins from
-         collapsing out of the flow, so scrollHeight measures the real used
-         height during pagination */
-      '.page-sheet .sheet-flow{position:relative;width:100%;height:100%;' +
-        'padding-top:0.1px;padding-bottom:0.1px}',
+      /* Docsify themes style .markdown-section as a web layout container.
+         Restore the sheet dimensions; 0.1px vertical padding prevents child
+         margins from collapsing out of the flow during measurement. */
+      '.docsify-print .page-sheet .sheet-flow{display:block;position:relative;inset:auto;float:none;' +
+        'width:100%;height:100%;min-width:0;min-height:0;max-width:none;max-height:none;' +
+        'margin:0;padding:0.1px 0;overflow:visible}',
       '.page-footer{position:absolute;right:16mm;bottom:8mm;' +
         'font:10pt/1 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#667}',
       /* --- table of contents ---
@@ -387,39 +417,8 @@
         'font-variant-numeric:tabular-nums;margin-right:8px}',
       '.sheet-flow .heading-number{color:var(--theme-color,#42b983);' +
         'font-variant-numeric:tabular-nums}',
-      /* --- chapters --- */
-      '.sheet-flow h1{font-size:23pt;margin:0 0 14px;padding-bottom:8px;' +
-        'border-bottom:2px solid var(--theme-color,#42b983);' +
-        'color:var(--theme-heading-color,#2c3e50)}',
-      '.sheet-flow h2{font-size:16pt;margin:24px 0 8px;' +
-        'color:var(--theme-heading-color,#2c3e50)}',
-      '.sheet-flow h3{font-size:13pt;margin:18px 0 6px;' +
-        'color:var(--theme-heading-color,#2c3e50)}',
-      /* Headings are wrapped in a link back to the table of contents; keep
-         the link invisible so headings look exactly as before. */
-      '.sheet-flow h1 a,.sheet-flow h2 a,.sheet-flow h3 a,' +
-        '.sheet-flow h4 a,.sheet-flow h5 a,.sheet-flow h6 a{color:inherit;text-decoration:none}',
-      '.sheet-flow p{margin:0 0 10px}',
-      '.sheet-flow blockquote{margin:10px 0;padding:8px 14px;' +
-        'border-left:4px solid var(--theme-blockquote-border,var(--theme-color,#42b983));' +
-        'background:var(--theme-blockquote-background,#f6faf8);' +
-        'color:var(--theme-blockquote-color,#858585);border-radius:0 6px 6px 0}',
-      '.sheet-flow blockquote p{margin:0}',
-      '.sheet-flow ul,.sheet-flow ol{margin:0 0 10px;padding-left:24px}',
-      '.sheet-flow pre{background:var(--theme-code-background,#f8f8f8);' +
-        'border:1px solid #e1e4e8;border-radius:6px;padding:12px;overflow:auto;' +
-        'font:10pt/1.5 "Courier New",monospace}',
-      '.sheet-flow code{font-family:"Courier New",monospace;' +
-        'background:var(--theme-code-background,#f8f8f8);padding:1px 5px;' +
-        'border-radius:4px;font-size:10.5pt}',
-      '.sheet-flow pre code{background:none;padding:0;' +
-        'color:var(--theme-code-color,#525252)}',
-      '.sheet-flow table{border-collapse:collapse;width:100%;margin:10px 0;font-size:11pt}',
-      '.sheet-flow th,.sheet-flow td{border:1px solid var(--theme-table-border-color,#ddd);' +
-        'padding:6px 10px;text-align:left}',
-      '.sheet-flow th{background:var(--theme-table-th-background,#f8f8f8)}',
-      '.sheet-flow img{max-width:100%;border-radius:4px}',
-      '.sheet-flow hr{border:none;border-top:1px solid #eee;margin:20px 0}',
+      /* Keep exporter-generated heading links visually neutral. */
+      '.sheet-flow a.print-toc-link{color:inherit;text-decoration:none}',
       /* Page-break markers never render — they only signal paginate() to
          start a fresh sheet for the content that follows them. (This also
          hides any marker that ends up nested inside a list item or table
@@ -484,7 +483,7 @@
     // The TOC title carries id="toc": it is the target of the "back to
     // contents" links wrapped around every chapter heading (added in
     // build()), so clicking any heading lands on the TOC page.
-    return '<section class="toc-page">' +
+    return '<section class="toc-page sheet-flow">' +
       '<h1 class="toc-title" id="toc">' + escapeHtml(TOC_TITLE) + '</h1>' +
       items +
       '</section>';
@@ -526,9 +525,10 @@
       : '';
     return [
       '<!DOCTYPE html>',
-      '<html><head><meta charset="utf-8">',
+      '<html class="docsify-print"><head><meta charset="utf-8">',
       '<title>' + PROJECT + '</title>',
-      '<style>' + themeRoot() + styles() + pageBg + '</style>',
+      '<style>' + fallbackStyles() + '</style>',
+      '<style id="print-pdf-layout">' + printLayoutStyles() + pageBg + '</style>',
       '</head><body>',
       cover,
       tocHtml(chapters),
@@ -539,11 +539,11 @@
   }
 
   /* Create an empty one-page sheet (used during pagination). */
-  function newSheet(doc) {
+  function newSheet(doc, isChapter) {
     var sheet = doc.createElement('div');
     sheet.className = 'page-sheet';
     var flow = doc.createElement('div');
-    flow.className = 'sheet-flow';
+    flow.className = isChapter ? 'sheet-flow markdown-section' : 'sheet-flow';
     sheet.appendChild(flow);
     return sheet;
   }
@@ -919,7 +919,7 @@
             return;
           }
           if (!oneFlow) {
-            var one = newSheet(doc);
+            var one = newSheet(doc, isChapter);
             allSheets.push(one);
             body.appendChild(one); // attach so fitToPage() can measure it
             oneFlow = one.querySelector('.sheet-flow');
@@ -956,7 +956,7 @@
       }
 
       function startSheet() {
-        current = newSheet(doc);
+        current = newSheet(doc, isChapter);
         allSheets.push(current);
         body.appendChild(current); // attach so it can be measured
         flow = current.querySelector('.sheet-flow');
@@ -1244,10 +1244,64 @@
     return new URL(url, window.location.origin + '/').href;
   }
 
-  /* Add optional overrides to the print document only. Append in config order
-     so equal-specificity rules in later files win, even if they load first. */
-  function loadPrintStylesheets(doc) {
-    var print = (window.$docsify && window.$docsify.print) || {};
+  function appendStylesheet(doc, node, before, label) {
+    return new Promise(function (resolve) {
+      node.addEventListener('load', resolve, { once: true });
+      node.addEventListener('error', function () {
+        // An inline style can contain usable rules even if an @import fails.
+        if (node.tagName === 'LINK') node.remove();
+        console.warn('[docsify-print-to-pdf] Could not load stylesheet: ' + label);
+        resolve();
+      }, { once: true });
+      doc.head.insertBefore(node, before);
+    });
+  }
+
+  /* Copy stylesheet elements, not scripts or the site's DOM. Insert in source
+     order between the fallback rules and the rules that size the print sheets. */
+  function loadSiteStylesheets(doc) {
+    var before = doc.getElementById('print-pdf-layout');
+    // Resolve inline CSS assets against the site's base, without changing
+    // how the finished export resolves its same-document TOC links.
+    var base = null;
+    if (doc.baseURI !== document.baseURI) {
+      base = doc.createElement('base');
+      base.href = document.baseURI;
+      doc.head.prepend(base);
+    }
+    try {
+      return Promise.all(Array.prototype.map.call(
+        document.querySelectorAll('link[rel~="stylesheet" i], style'), function (source) {
+          if (source.id === 'print-pdf-button-style' || source.disabled ||
+              (source.sheet && source.sheet.disabled)) return;
+          if (source.type && source.type.toLowerCase() !== 'text/css') return;
+          var node = doc.createElement(source.localName);
+          ['media', 'title', 'crossorigin', 'integrity', 'referrerpolicy'].forEach(function (name) {
+            if (source.hasAttribute(name)) node.setAttribute(name, source.getAttribute(name));
+          });
+          if (source.nonce) node.nonce = source.nonce;
+          if (source.tagName === 'LINK') {
+            if (!source.getAttribute('href')) return;
+            node.rel = source.rel;
+            node.href = source.href;
+            return appendStylesheet(doc, node, before, node.href);
+          }
+
+          // Use live inline rules so styles added via insertRule() are copied too.
+          node.textContent = source.sheet ? Array.prototype.map.call(source.sheet.cssRules,
+            function (rule) { return rule.cssText; }).join('\n') : source.textContent;
+          if (/^\s*@import\b/im.test(node.textContent)) {
+            return appendStylesheet(doc, node, before, source.id || '<style> @import');
+          }
+          doc.head.insertBefore(node, before);
+        }));
+    } finally {
+      if (base) base.remove();
+    }
+  }
+
+  /* Add optional overrides last, in config order. */
+  function loadPrintStylesheets(doc, print) {
     var urls = Array.isArray(print.cssUrl) ? print.cssUrl : [print.cssUrl];
     return Promise.all(urls.map(function (url) {
       if (typeof url !== 'string' || !url.trim()) return;
@@ -1259,22 +1313,15 @@
         console.warn('[docsify-print-to-pdf] Invalid print stylesheet URL: ' + url);
         return;
       }
-      return new Promise(function (resolve) {
-        var link = doc.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = href;
-        link.addEventListener('load', resolve, { once: true });
-        link.addEventListener('error', function () {
-          link.remove();
-          console.warn('[docsify-print-to-pdf] Could not load print stylesheet: ' + href);
-          resolve();
-        }, { once: true });
-        doc.head.appendChild(link);
-      });
+      var link = doc.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      return appendStylesheet(doc, link, null, href);
     }));
   }
 
   async function build() {
+    var print = (window.$docsify && window.$docsify.print) || {};
     var chapters = await getChapters();
     // Hierarchical chapter numbers ("1.", "2.", "3.1", …) derived from the
     // sidebar nesting — only when print.headingNumbers is enabled. One
@@ -1356,6 +1403,7 @@
         // link are left alone (an <a> cannot contain another <a>).
         if (!h.querySelector('a')) {
           var backLink = document.createElement('a');
+          backLink.className = 'print-toc-link';
           backLink.href = '#toc';
           while (h.firstChild) backLink.appendChild(h.firstChild);
           h.appendChild(backLink);
@@ -1377,7 +1425,7 @@
       });
       ch.sections = sections;
       ch.headingId = chapterTitleId;
-      chunks.push('<section class="chapter">' + holder.innerHTML + '</section>');
+      chunks.push('<section class="chapter sheet-flow markdown-section">' + holder.innerHTML + '</section>');
     }
 
     var coverUrl = resolveAsset(COVER_URL);
@@ -1399,8 +1447,17 @@
     doc.open();
     doc.write(pageHtml(coverUrl, backUrl, pageCoverUrl, chapters, chunks.join('\n')));
     doc.close();
-    // Layout overrides must be in place before paginate() measures the sheets.
-    await Promise.all([loadPrintStylesheets(doc), waitForImages(doc)]);
+    // Stylesheets and fonts must be ready before measuring page content.
+    await Promise.all([
+      print.inheritSiteStyles !== false && loadSiteStylesheets(doc),
+      loadPrintStylesheets(doc, print),
+      waitForImages(doc)
+    ]);
+    if (doc.fonts) {
+      // Flush the styled chapter layout so its fonts are requested before ready.
+      doc.body.getBoundingClientRect();
+      await doc.fonts.ready;
+    }
     // Drop the back page if its image failed to load, so the PDF never
     // contains a broken back cover.
     var backPage = doc.querySelector('.back-page');
